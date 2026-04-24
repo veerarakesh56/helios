@@ -29,6 +29,9 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         scenario: PathBuf,
+        /// Emit FailureChain as JSON on stdout instead of plain text.
+        #[arg(long)]
+        json: bool,
     },
     /// Re-run simulation with a proposed fix applied and confirm it resolves failures.
     Verify {
@@ -38,6 +41,8 @@ enum Command {
         #[arg(long)]
         fix: PathBuf,
     },
+    /// Narrate a FailureChain (read as JSON on stdin) via the helios-ai Python shell.
+    Explain,
 }
 
 fn main() -> Result<()> {
@@ -49,12 +54,17 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Plan { input } => cmd_plan(&input),
-        Command::Simulate { input, scenario } => cmd_simulate(&input, &scenario),
+        Command::Simulate {
+            input,
+            scenario,
+            json,
+        } => cmd_simulate(&input, &scenario, json),
         Command::Verify {
             input,
             scenario,
             fix,
         } => cmd_verify(&input, &scenario, &fix),
+        Command::Explain => cmd_explain(),
     }
 }
 
@@ -68,13 +78,18 @@ fn cmd_plan(input: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
+fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool) -> Result<()> {
     let graph = helios_graph::load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let chain =
         helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
-    print!("{}", chain.render_plain());
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout().lock(), &chain)?;
+        println!();
+    } else {
+        print!("{}", chain.render_plain());
+    }
     if !chain.is_safe() {
         std::process::exit(1);
     }
@@ -87,4 +102,45 @@ fn cmd_verify(
     _fix: &std::path::Path,
 ) -> Result<()> {
     anyhow::bail!("`helios verify` lands Weekend 4 (fix generation + re-simulation)")
+}
+
+/// Shell out to `python -m helios_ai explain`, piping stdin through and stdout back.
+///
+/// The Python shell must be on PATH with `helios_ai` importable (e.g. from the
+/// helios-ai/.venv activated, or via `uv run --project helios-ai python -m ...`).
+/// Override the interpreter with `HELIOS_AI_PYTHON=/path/to/python`.
+fn cmd_explain() -> Result<()> {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|e| anyhow::anyhow!("reading FailureChain JSON from stdin: {e}"))?;
+
+    let python = std::env::var("HELIOS_AI_PYTHON").unwrap_or_else(|_| "python".to_string());
+
+    let mut child = Command::new(&python)
+        .args(["-m", "helios_ai", "explain"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "spawning `{python} -m helios_ai explain` — is helios-ai installed? ({e})"
+            )
+        })?;
+
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin piped")
+        .write_all(input.as_bytes())?;
+
+    let status = child.wait()?;
+    if !status.success() {
+        anyhow::bail!("`{python} -m helios_ai explain` failed: {status}");
+    }
+    Ok(())
 }

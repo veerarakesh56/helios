@@ -33,6 +33,20 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) (coming Weekend 2) and [`docs/ai-boun
 - First E2E: `helios simulate fixtures/three-tier-webapp --scenario fixtures/scenarios/az-outage.yaml` prints the failure chain.
 - Scenario schema documented in [`docs/scenarios.md`](docs/scenarios.md).
 
+## Weekend 3 — Claude explain layer ✅
+
+- `helios simulate ... --json` emits the `FailureChain` as JSON on stdout.
+- `helios-ai/` is a uv-managed Python package that reads that JSON on stdin and writes a human-readable markdown narrative on stdout via Claude, with prompt caching on the system prompt + availability-model glossary.
+- `helios explain` shells out to `python -m helios_ai explain` so the user can pipe end-to-end:
+
+  ```bash
+  helios simulate ./infra --scenario scenarios/az-outage.yaml --json | helios explain
+  ```
+
+  Set `ANTHROPIC_API_KEY` in the environment, and set `HELIOS_AI_PYTHON` to point at the Python interpreter that has `helios_ai` installed (e.g. `helios-ai/.venv/bin/python`) if it isn't on `PATH`.
+
+- See [`helios-ai/`](helios-ai/) for the Python side and [`docs/ai-boundary.md`](docs/ai-boundary.md) (Weekend 6) for why Claude only narrates and never decides.
+
 ## License
 
 Apache-2.0. See [`LICENSE`](./LICENSE).
