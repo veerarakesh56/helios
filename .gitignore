@@ -1,0 +1,48 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python (Weekend 3+)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv-cache/
+
+# Node (Weekend 5 web UI)
+node_modules/
+dist/
+.vite/
+
+# Terraform working state — never commit
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+aws-credentials
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Helios artifacts
+/reports/
+/fixes/
+*.helios.json
