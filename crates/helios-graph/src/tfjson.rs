@@ -1,7 +1,7 @@
 //! Minimal typed mirror of `terraform show -json` output.
 //!
 //! Only the subset helios-graph actually reads. Schema reference:
-//! https://developer.hashicorp.com/terraform/internals/json-format
+//! <https://developer.hashicorp.com/terraform/internals/json-format>
 
 use serde::Deserialize;
 use serde_json::Value;
