@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 
-use helios_graph::{Resource, ResourceGraph};
+use helios_graph::{Dependency, Resource, ResourceGraph};
 use helios_models::{availability_for, AvailabilityModel};
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use z3::{ast::Bool, SatResult, Solver};
 
 /// Smoke test the Z3 binding compiles and links.
@@ -100,6 +101,31 @@ impl Encoder {
             self.resource_down.insert(idx, down);
         }
     }
+
+    /// For every strong containment edge, assert `parent_down ⇒ child_down`.
+    ///
+    /// Only [`Dependency::Contains`] edges propagate — they represent hard parent/child
+    /// links (subnet→vpc, instance→subnet) where the child cannot survive the parent.
+    /// [`Dependency::MemberOf`] edges (alb/lambda into a set of subnets) are loose: the
+    /// resource's availability model already captures the per-AZ membership, so adding
+    /// an implication here would over-constrain and falsely kill Regional services like
+    /// Lambda when a single member subnet fails.
+    pub fn encode_dependencies(&self, graph: &ResourceGraph, solver: &Solver) {
+        for edge in graph.edge_references() {
+            if !matches!(edge.weight(), Dependency::Contains(_)) {
+                continue;
+            }
+            let child_idx = edge.source();
+            let parent_idx = edge.target();
+            let (Some(child), Some(parent)) = (
+                self.resource_down.get(&child_idx),
+                self.resource_down.get(&parent_idx),
+            ) else {
+                continue;
+            };
+            solver.assert(parent.implies(child));
+        }
+    }
 }
 
 /// Map our `ResourceKind` back to the Terraform type string that `availability_for` expects.
@@ -175,6 +201,35 @@ mod encode_tests {
         let model = solver.get_model().unwrap();
         let ec2_val = model.eval(&ec2_down, true).unwrap().as_bool().unwrap();
         assert!(ec2_val, "EC2 in us-east-1a must be down when 1a is down");
+    }
+
+    #[test]
+    fn subnet_down_propagates_to_ec2() {
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let ec2_idx = graph
+            .node_indices()
+            .find(|i| graph[*i].id == "aws_instance.web")
+            .unwrap();
+        let subnet_idx = graph
+            .node_indices()
+            .find(|i| graph[*i].id == "aws_subnet.public_a")
+            .unwrap();
+
+        let ec2_down = enc.resource_down[&ec2_idx].clone();
+        let subnet_down = enc.resource_down[&subnet_idx].clone();
+
+        solver.assert(&subnet_down);
+        solver.assert(enc.region_var("us-east-1").not());
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let model = solver.get_model().unwrap();
+        let ec2_val = model.eval(&ec2_down, true).unwrap().as_bool().unwrap();
+        assert!(ec2_val, "EC2 must be down when its subnet is down");
     }
 
     #[test]
