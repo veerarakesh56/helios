@@ -47,6 +47,35 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) (coming Weekend 2) and [`docs/ai-boun
 
 - See [`helios-ai/`](helios-ai/) for the Python side and [`docs/ai-boundary.md`](docs/ai-boundary.md) (Weekend 6) for why Claude only narrates and never decides.
 
+## Weekend 4 — Fix generation + verify loop ✅
+
+- `helios-ai propose-fix` reads `{chain, attrs_snapshot}` JSON on stdin and emits a structured `FixProposal` (`{scenario_name, explanation, edits[]}`) via Claude with `output_config.format` and a two-breakpoint cache.
+- `helios verify <tf-json> --scenario <yaml> --fix <json>` re-simulates with the fix applied and reports `Resolved` / `Still failing` / `New failures introduced` sections, exiting non-zero if anything still fails.
+
+## Weekend 5 — GitHub Action + web viewer ✅
+
+- `helios inspect <tf-json> --scenario <yaml>` emits `{scenario, graph: {nodes, edges}, chain}` as a single JSON document on stdout — the input the GitHub Action uploads as an artifact and the web viewer renders.
+- **GitHub Action** at [`action/`](./action) is a composite action that runs over every scenario in `fixtures/scenarios/*.yaml`, optionally re-runs `helios verify` if a matching `fixes/<scenario>.json` is committed, uploads each `inspect` JSON as a workflow artifact, and posts a single sticky PR comment summarising the verdict (one collapsible `<details>` per scenario). Caches the prebuilt `helios` binary keyed on `Cargo.lock` + crate sources, so the second run on a PR is fast.
+
+  Wire it into a workflow:
+
+  ```yaml
+  on: pull_request
+  permissions:
+    contents: read
+    pull-requests: write
+  jobs:
+    helios:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: ./action
+          with:
+            github-token: ${{ secrets.GITHUB_TOKEN }}
+  ```
+
+- **Web viewer** at [`web/`](./web) is a Vite + React + cytoscape.js single-page app. `npm run dev` for local dev; `npm run build` for a static bundle. Drag a `helios inspect` JSON into the file picker (or paste it into the textarea) — failed resources render red, `Contains` edges thick + solid, `MemberOf` edges thin + dashed, click any node to see its Terraform attrs and failure reason.
+
 ## License
 
 Apache-2.0. See [`LICENSE`](./LICENSE).

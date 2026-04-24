@@ -1,0 +1,106 @@
+name: Helios PR analysis
+description: >
+  Run helios simulate (and verify, if a matching fix is committed) over every
+  scenario in fixtures/scenarios/, upload the resulting `inspect` JSON
+  artifacts, and post a single sticky PR comment summarising results.
+author: veerarakesh56
+
+branding:
+  icon: alert-triangle
+  color: orange
+
+inputs:
+  scenarios-glob:
+    description: Glob (relative to repo root) for scenario YAML files.
+    required: false
+    default: fixtures/scenarios/*.yaml
+  fixes-dir:
+    description: >
+      Directory holding `<scenario-stem>.json` FixProposal files. If present
+      and a matching file exists, helios verify runs after inspect.
+    required: false
+    default: fixes
+  terraform-json:
+    description: >
+      Path (file or directory) holding the terraform-show.json the action
+      simulates against.
+    required: false
+    default: fixtures/three-tier-webapp
+  github-token:
+    description: >
+      Token used to post the PR comment. Needs `pull-requests: write`.
+      Defaults to ${{ github.token }} from the calling workflow.
+    required: true
+  artifact-name:
+    description: Name of the workflow artifact holding inspect JSONs.
+    required: false
+    default: helios-inspect
+
+outputs:
+  comment-body:
+    description: The markdown body posted to the PR (also saved to $RUNNER_TEMP/helios-comment.md).
+    value: ${{ steps.build-comment.outputs.body-path }}
+  artifact-dir:
+    description: Local directory containing the per-scenario inspect JSONs.
+    value: ${{ steps.run.outputs.artifact-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Cache prebuilt helios binary
+      id: helios-bin-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.action_path }}/bin
+        key: helios-bin-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'crates/**/*.rs') }}
+
+    - name: Build helios (cache miss only)
+      if: steps.helios-bin-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        cargo build --release --bin helios
+        mkdir -p "${{ github.action_path }}/bin"
+        cp target/release/helios "${{ github.action_path }}/bin/helios"
+        chmod +x "${{ github.action_path }}/bin/helios"
+
+    - name: Run scenarios
+      id: run
+      shell: bash
+      env:
+        HELIOS_BIN: ${{ github.action_path }}/bin/helios
+        SCENARIOS_GLOB: ${{ inputs.scenarios-glob }}
+        FIXES_DIR: ${{ inputs.fixes-dir }}
+        TERRAFORM_JSON: ${{ inputs.terraform-json }}
+        ARTIFACT_DIR: ${{ runner.temp }}/helios-artifact
+      run: ${{ github.action_path }}/scripts/run-scenarios.sh
+
+    - name: Build PR comment body
+      id: build-comment
+      shell: bash
+      env:
+        ARTIFACT_DIR: ${{ steps.run.outputs.artifact-dir }}
+        COMMENT_PATH: ${{ runner.temp }}/helios-comment.md
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        RUN_ID: ${{ github.run_id }}
+        SERVER_URL: ${{ github.server_url }}
+        REPOSITORY: ${{ github.repository }}
+      run: ${{ github.action_path }}/scripts/build-comment.sh
+
+    - name: Upload inspect artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.run.outputs.artifact-dir }}
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Post sticky PR comment
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_PATH: ${{ runner.temp }}/helios-comment.md
+      run: ${{ github.action_path }}/scripts/post-sticky.sh
