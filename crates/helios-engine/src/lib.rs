@@ -1,16 +1,10 @@
 //! Z3-powered simulation core.
-//!
-//! Placeholder for Weekend 1. Weekend 2 fills in:
-//! - Scenario → SMT constraint encoding
-//! - Z3 counter-example extraction
-//! - Failure-chain reconstruction
 
-/// Stub. Returned from `helios simulate` so the binary links.
-#[derive(Debug, Default)]
-pub struct Report {
-    pub failures: Vec<String>,
-}
+pub mod report;
+pub mod scenario;
+pub mod simulate;
+pub mod smt;
 
-pub fn simulate_stub() -> Report {
-    Report::default()
-}
+pub use report::{FailedResource, FailureChain};
+pub use scenario::{Scenario, ScenarioError, ScenarioKind};
+pub use simulate::{simulate, SimulateError};
