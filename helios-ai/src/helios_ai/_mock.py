@@ -86,7 +86,7 @@ def _fake_fix_proposal(kwargs: dict[str, Any]) -> _Message:
     body = {
         "scenario_name": scenario_name,
         "explanation": (
-            "Mocked FixProposal — move the first failed resource to a "
+            "Mocked FixProposal -- move the first failed resource to a "
             "different availability zone."
         ),
         "edits": [

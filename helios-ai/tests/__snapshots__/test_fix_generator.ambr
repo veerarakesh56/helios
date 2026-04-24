@@ -9,7 +9,7 @@
         'value': 'us-east-1b',
       }),
     ]),
-    'explanation': 'Mocked FixProposal — move the first failed resource to a different availability zone.',
+    'explanation': 'Mocked FixProposal -- move the first failed resource to a different availability zone.',
     'scenario_name': 'lose-us-east-1a',
   })
 # ---
