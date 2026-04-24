@@ -1,4 +1,4 @@
-//! `verify` re-runs [`crate::simulate`] against a fix-patched graph and diffs
+//! `verify` re-runs [`crate::simulate()`] against a fix-patched graph and diffs
 //! the failure chains. Used by `helios verify` (Weekend 4 CLI).
 
 use std::collections::BTreeSet;
@@ -36,7 +36,7 @@ pub enum VerifyError {
     Simulate(#[from] SimulateError),
 }
 
-/// Run [`simulate`] on `graph` before and after applying `fix`, then diff
+/// Run [`simulate()`] on `graph` before and after applying `fix`, then diff
 /// the failure id sets into a [`VerifyReport`].
 pub fn verify(
     graph: &ResourceGraph,
@@ -95,7 +95,9 @@ mod tests {
         let report = verify(&graph, &scenario, &fix).unwrap();
 
         assert!(
-            report.resolved.contains(&"aws_elasticache_cluster.cache".to_string()),
+            report
+                .resolved
+                .contains(&"aws_elasticache_cluster.cache".to_string()),
             "cache should be resolved; got resolved={:?}",
             report.resolved
         );
@@ -105,7 +107,9 @@ mod tests {
             report.new_failures
         );
         assert!(
-            report.remaining.contains(&"aws_subnet.public_a".to_string()),
+            report
+                .remaining
+                .contains(&"aws_subnet.public_a".to_string()),
             "subnet.public_a still fails; got remaining={:?}",
             report.remaining
         );

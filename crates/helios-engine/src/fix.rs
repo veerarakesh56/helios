@@ -1,6 +1,6 @@
 //! Fix proposals (Weekend 4). Claude produces these via structured outputs;
-//! the engine's [`crate::apply_fix`] applies them to a graph clone and
-//! [`crate::verify`] re-runs simulate to confirm they resolve the chain.
+//! the engine's [`apply_fix`] applies them to a graph clone and
+//! [`crate::verify()`] re-runs simulate to confirm they resolve the chain.
 //!
 //! v0.1 supports only the `set_attr` op. `add_resource` / `remove_resource`
 //! land in v0.2 when the Pydantic + graph write surface grows.

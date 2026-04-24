@@ -141,7 +141,9 @@ fn propose_fix_subcommand_emits_valid_fix_json_via_mock() {
         .write_all(payload.as_bytes())
         .unwrap();
 
-    let output = child.wait_with_output().expect("wait helios_ai propose-fix");
+    let output = child
+        .wait_with_output()
+        .expect("wait helios_ai propose-fix");
     assert!(
         output.status.success(),
         "propose-fix failed: {}\nstderr: {}",
@@ -192,13 +194,15 @@ fn verify_with_resolving_fix_reports_resolved_section() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Resolved")
-            && stdout.contains("aws_elasticache_cluster.cache"),
+        stdout.contains("Resolved") && stdout.contains("aws_elasticache_cluster.cache"),
         "expected Resolved section naming cache; got:\n{stdout}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     // Some failures remain (subnet + instance), so exit code is non-zero.
-    assert!(!output.status.success(), "expected non-zero exit (remaining failures)");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit (remaining failures)"
+    );
 }
 
 #[test]
@@ -225,7 +229,10 @@ fn verify_rejects_fix_naming_unknown_resource() {
         .output()
         .expect("spawn helios verify");
 
-    assert!(!output.status.success(), "expected non-zero exit on unknown resource");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit on unknown resource"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("unknown resource") || stderr.contains("aws_nope.ghost"),

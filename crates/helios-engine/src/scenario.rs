@@ -99,7 +99,8 @@ mod tests {
 
     #[test]
     fn parses_slow_rds_failover() {
-        let yaml = "name: rds-slow\nkind:\n  type: slow-rds-failover\n  db_id: aws_db_instance.primary\n";
+        let yaml =
+            "name: rds-slow\nkind:\n  type: slow-rds-failover\n  db_id: aws_db_instance.primary\n";
         let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(
             s.kind,
@@ -111,7 +112,8 @@ mod tests {
 
     #[test]
     fn parses_single_nat_death() {
-        let yaml = "name: nat-dead\nkind:\n  type: single-nat-death\n  subnet_id: aws_subnet.public_a\n";
+        let yaml =
+            "name: nat-dead\nkind:\n  type: single-nat-death\n  subnet_id: aws_subnet.public_a\n";
         let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(
             s.kind,

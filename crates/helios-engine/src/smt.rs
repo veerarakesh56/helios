@@ -168,10 +168,7 @@ impl Encoder {
                 // v0.1: string-match iam_role_arn / role_arn on resource attrs.
                 for (idx, down) in &self.resource_down {
                     let r: &Resource = &graph[*idx];
-                    let hit = r
-                        .attrs
-                        .get("iam_role_arn")
-                        .and_then(|v| v.as_str())
+                    let hit = r.attrs.get("iam_role_arn").and_then(|v| v.as_str())
                         == Some(principal_arn.as_str())
                         || r.attrs.get("role_arn").and_then(|v| v.as_str())
                             == Some(principal_arn.as_str());
