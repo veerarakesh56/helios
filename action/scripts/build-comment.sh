@@ -38,7 +38,7 @@ for inspect_json in "$ARTIFACT_DIR"/*.json; do
       echo
       echo "| Resource | Kind | Reason |"
       echo "|---|---|---|"
-      jq -r '.chain.failures[:3][] | "| \`\(.id)\` | \(.kind) | \(.reason) |"' "$inspect_json"
+      jq -r '.chain.failures[:3][] | "| `\(.id)` | \(.kind) | \(.reason) |"' "$inspect_json"
       if [[ "$failure_count" -gt 3 ]]; then
         echo
         echo "_…and $((failure_count - 3)) more in the artifact._"
