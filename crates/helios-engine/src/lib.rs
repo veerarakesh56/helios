@@ -6,7 +6,7 @@ pub mod scenario;
 pub mod simulate;
 pub mod smt;
 
-pub use fix::{FixEdit, FixError, FixProposal};
+pub use fix::{apply_fix, FixEdit, FixError, FixProposal};
 pub use report::{FailedResource, FailureChain};
 pub use scenario::{Scenario, ScenarioError, ScenarioKind};
 pub use simulate::{simulate, SimulateError};

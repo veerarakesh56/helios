@@ -54,9 +54,43 @@ pub fn load(path: &Path) -> Result<FixProposal, FixError> {
     Ok(serde_json::from_str(&raw)?)
 }
 
+/// Apply a [`FixProposal`] to a clone of `graph` and return the patched graph.
+///
+/// The original graph is untouched. Only `set_attr` edits are supported in
+/// v0.1; unknown resources and non-object attrs surface as [`FixError`].
+pub fn apply_fix(
+    graph: &helios_graph::ResourceGraph,
+    fix: &FixProposal,
+) -> Result<helios_graph::ResourceGraph, FixError> {
+    let mut patched = graph.clone();
+    for edit in &fix.edits {
+        match edit {
+            FixEdit::SetAttr {
+                resource_id,
+                key,
+                value,
+            } => {
+                let idx = patched
+                    .node_indices()
+                    .find(|i| &patched[*i].id == resource_id)
+                    .ok_or_else(|| FixError::UnknownResource(resource_id.clone()))?;
+                let obj = patched[idx]
+                    .attrs
+                    .as_object_mut()
+                    .ok_or_else(|| FixError::AttrsNotObject(resource_id.clone()))?;
+                obj.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Ok(patched)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_graph::from_json;
+
+    const FIXTURE: &str = include_str!("../../../fixtures/three-tier-webapp/terraform-show.json");
 
     #[test]
     fn fix_proposal_roundtrips_json() {
@@ -89,5 +123,93 @@ mod tests {
     fn load_missing_file_returns_read_error() {
         let p = std::path::Path::new("/nonexistent/fix.json");
         assert!(matches!(load(p), Err(FixError::Read { .. })));
+    }
+
+    #[test]
+    fn apply_fix_overwrites_existing_attr() {
+        let graph = from_json(FIXTURE).unwrap();
+        let fix = FixProposal {
+            scenario_name: "x".into(),
+            explanation: "x".into(),
+            edits: vec![FixEdit::SetAttr {
+                resource_id: "aws_elasticache_cluster.cache".into(),
+                key: "availability_zone".into(),
+                value: serde_json::json!("us-east-1b"),
+            }],
+        };
+        let patched = apply_fix(&graph, &fix).unwrap();
+        let idx = patched
+            .node_indices()
+            .find(|i| patched[*i].id == "aws_elasticache_cluster.cache")
+            .expect("fixture contains elasticache.cache");
+        assert_eq!(
+            patched[idx].attrs["availability_zone"],
+            serde_json::json!("us-east-1b")
+        );
+    }
+
+    #[test]
+    fn apply_fix_inserts_new_attr() {
+        let graph = from_json(FIXTURE).unwrap();
+        let fix = FixProposal {
+            scenario_name: "x".into(),
+            explanation: "x".into(),
+            edits: vec![FixEdit::SetAttr {
+                resource_id: "aws_db_instance.primary".into(),
+                key: "failover_seconds_max".into(),
+                value: serde_json::json!(60),
+            }],
+        };
+        let patched = apply_fix(&graph, &fix).unwrap();
+        let idx = patched
+            .node_indices()
+            .find(|i| patched[*i].id == "aws_db_instance.primary")
+            .unwrap();
+        assert_eq!(
+            patched[idx].attrs["failover_seconds_max"],
+            serde_json::json!(60)
+        );
+    }
+
+    #[test]
+    fn apply_fix_leaves_original_graph_untouched() {
+        let graph = from_json(FIXTURE).unwrap();
+        let fix = FixProposal {
+            scenario_name: "x".into(),
+            explanation: "x".into(),
+            edits: vec![FixEdit::SetAttr {
+                resource_id: "aws_elasticache_cluster.cache".into(),
+                key: "availability_zone".into(),
+                value: serde_json::json!("us-east-1b"),
+            }],
+        };
+        let _ = apply_fix(&graph, &fix).unwrap();
+        let orig_idx = graph
+            .node_indices()
+            .find(|i| graph[*i].id == "aws_elasticache_cluster.cache")
+            .unwrap();
+        assert_eq!(
+            graph[orig_idx].attrs["availability_zone"],
+            serde_json::json!("us-east-1a"),
+            "original graph must not be mutated"
+        );
+    }
+
+    #[test]
+    fn apply_fix_unknown_resource_errors() {
+        let graph = from_json(FIXTURE).unwrap();
+        let fix = FixProposal {
+            scenario_name: "x".into(),
+            explanation: "x".into(),
+            edits: vec![FixEdit::SetAttr {
+                resource_id: "aws_nope.ghost".into(),
+                key: "foo".into(),
+                value: serde_json::json!(1),
+            }],
+        };
+        match apply_fix(&graph, &fix) {
+            Err(FixError::UnknownResource(id)) => assert_eq!(id, "aws_nope.ghost"),
+            other => panic!("expected UnknownResource, got {other:?}"),
+        }
     }
 }
