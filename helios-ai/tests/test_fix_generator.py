@@ -19,6 +19,18 @@ def _cache_chain() -> FailureChain:
     )
 
 
+def test_propose_fix_matches_snapshot(fake_client, snapshot) -> None:
+    chain = _cache_chain()
+    fix = propose_fix(
+        chain,
+        attrs_snapshot={
+            "aws_elasticache_cluster.cache": {"availability_zone": "us-east-1a"}
+        },
+        client=fake_client,
+    )
+    assert fix.model_dump(mode="json") == snapshot
+
+
 def test_propose_fix_returns_valid_fix_proposal(fake_client) -> None:
     chain = _cache_chain()
     fix = propose_fix(
