@@ -35,3 +35,33 @@ def test_explain_passes_failure_chain_json_on_user_turn(fake_client) -> None:
     user_content = call["messages"][0]["content"]
     assert '"scenario"' in user_content
     assert '"test-xyz"' in user_content
+
+
+def test_cli_reads_stdin_writes_stdout(fake_client, capsys, monkeypatch) -> None:
+    import io
+
+    from helios_ai import cli
+
+    chain_json = (FIXTURES / "az_outage_chain.json").read_text()
+    monkeypatch.setattr(cli, "_build_client", lambda: fake_client)
+    monkeypatch.setattr("sys.stdin", io.StringIO(chain_json))
+
+    exit_code = cli.main(["explain"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Failure narrative" in out
+
+
+def test_cli_mock_env_uses_mock_client(monkeypatch, capsys) -> None:
+    import io
+
+    from helios_ai import cli
+
+    monkeypatch.setenv("HELIOS_AI_MOCK", "1")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"scenario":"noop","failures":[]}'))
+
+    exit_code = cli.main(["explain"])
+    assert exit_code == 0
+    assert "mocked" in capsys.readouterr().out

@@ -7,6 +7,7 @@ without the tests/ directory being on sys.path.
 
 from __future__ import annotations
 
+import contextlib
 import json as _json
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,10 +44,8 @@ class _Messages:
         for m in kwargs.get("messages", []):
             content = m.get("content", "")
             if isinstance(content, str) and '"scenario"' in content:
-                try:
+                with contextlib.suppress(_json.JSONDecodeError):
                     scenario = _json.loads(content).get("scenario", scenario)
-                except _json.JSONDecodeError:
-                    pass
         text = (
             f"# Failure narrative for {scenario}\n\n"
             "Claude would explain the chain here. (mocked)"
