@@ -8,6 +8,8 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use z3::{ast::Bool, SatResult, Solver};
 
+use crate::report::{FailedResource, FailureChain};
+
 /// Smoke test the Z3 binding compiles and links.
 #[doc(hidden)]
 pub fn solver_smoke() -> SatResult {
@@ -126,6 +128,88 @@ impl Encoder {
             solver.assert(parent.implies(child));
         }
     }
+
+    /// Apply a [`crate::Scenario`] to the solver by forcing the right Bool(s) true.
+    pub fn apply_scenario(&mut self, scenario: &crate::Scenario, solver: &Solver) {
+        match &scenario.kind {
+            crate::ScenarioKind::AzOutage { az } => {
+                let v = self.az_var(az);
+                solver.assert(&v);
+                // Pin the region UP so we observe the AZ effect in isolation.
+                let region = region_of_az(az);
+                solver.assert(self.region_var(&region).not());
+            }
+            crate::ScenarioKind::RegionOutage { region } => {
+                let v = self.region_var(region);
+                solver.assert(&v);
+            }
+        }
+    }
+
+    /// After `solver.check() == Sat`, build the failure chain from the model.
+    pub fn extract_failures(
+        &self,
+        graph: &ResourceGraph,
+        scenario: &crate::Scenario,
+        solver: &Solver,
+    ) -> FailureChain {
+        let Some(model) = solver.get_model() else {
+            return FailureChain {
+                scenario: scenario.name.clone(),
+                failures: vec![],
+            };
+        };
+        let mut failures = Vec::new();
+        for (idx, down_bool) in &self.resource_down {
+            let is_down = model
+                .eval(down_bool, true)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !is_down {
+                continue;
+            }
+            let r: &Resource = &graph[*idx];
+            let reason = reason_for(r, scenario);
+            failures.push(FailedResource {
+                id: r.id.clone(),
+                kind: format!("{:?}", r.kind),
+                reason,
+            });
+        }
+        failures.sort_by(|a, b| a.id.cmp(&b.id));
+        FailureChain {
+            scenario: scenario.name.clone(),
+            failures,
+        }
+    }
+}
+
+/// Short per-resource explanation for why this scenario takes it down.
+/// Purely derived from the availability model + scenario kind (no Z3 needed).
+fn reason_for(r: &Resource, scenario: &crate::Scenario) -> String {
+    let model = availability_for(tf_type_of(&r.kind), &r.attrs, DEFAULT_REGION);
+    match (&model, &scenario.kind) {
+        (AvailabilityModel::SingleAz { az }, crate::ScenarioKind::AzOutage { az: s_az })
+            if az == s_az =>
+        {
+            format!("single-AZ in {az}, which is down")
+        }
+        (AvailabilityModel::SingleAz { az }, crate::ScenarioKind::RegionOutage { region })
+            if &region_of_az(az) == region =>
+        {
+            format!("single-AZ in {az} (region {region} is down)")
+        }
+        (AvailabilityModel::MultiAz { azs, .. }, crate::ScenarioKind::RegionOutage { region })
+            if azs.iter().all(|a| &region_of_az(a) == region) =>
+        {
+            format!("multi-AZ across {azs:?} — whole region {region} is down")
+        }
+        (
+            AvailabilityModel::Regional { region },
+            crate::ScenarioKind::RegionOutage { region: r },
+        ) if region == r => format!("regional in {region}, which is down"),
+        _ => "failure propagated from a dependency".to_string(),
+    }
 }
 
 /// Map our `ResourceKind` back to the Terraform type string that `availability_for` expects.
@@ -172,6 +256,7 @@ mod region_tests {
 #[cfg(test)]
 mod encode_tests {
     use super::*;
+    use crate::{Scenario, ScenarioKind};
     use helios_graph::from_json;
 
     const FIXTURE: &str =
@@ -252,5 +337,58 @@ mod encode_tests {
         let model = solver.get_model().unwrap();
         let s3_val = model.eval(&s3_down, true).unwrap().as_bool().unwrap();
         assert!(!s3_val, "S3 must not be down from an AZ outage alone");
+    }
+
+    #[test]
+    fn az_outage_takes_single_az_resources_down() {
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "lose-1a".into(),
+            kind: ScenarioKind::AzOutage {
+                az: "us-east-1a".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert!(ids.contains(&"aws_subnet.public_a"), "subnet in 1a must fail");
+        assert!(ids.contains(&"aws_instance.web"), "ec2 in 1a must fail");
+        assert!(
+            !ids.contains(&"aws_subnet.public_b"),
+            "subnet in 1b must survive"
+        );
+    }
+
+    #[test]
+    fn region_outage_takes_everything_down_except_global() {
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "lose-useast1".into(),
+            kind: ScenarioKind::RegionOutage {
+                region: "us-east-1".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+
+        assert!(
+            chain.failures.len() >= graph.node_count() - 1,
+            "at least all non-edge resources must fail"
+        );
     }
 }
