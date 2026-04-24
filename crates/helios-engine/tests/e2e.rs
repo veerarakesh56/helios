@@ -21,7 +21,10 @@ fn three_tier_webapp_az_outage_e2e() {
     assert!(matches!(sc.kind, ScenarioKind::AzOutage { .. }));
 
     let chain = simulate(&graph, &sc).unwrap();
-    assert!(!chain.is_safe(), "AZ-1a outage must fail at least one resource");
+    assert!(
+        !chain.is_safe(),
+        "AZ-1a outage must fail at least one resource"
+    );
 
     let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
     assert!(ids.contains(&"aws_subnet.public_a"));

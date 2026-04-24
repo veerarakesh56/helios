@@ -17,10 +17,7 @@ pub enum SimulateError {
 }
 
 /// Run one scenario against one graph. Returns the failure chain.
-pub fn simulate(
-    graph: &ResourceGraph,
-    scenario: &Scenario,
-) -> Result<FailureChain, SimulateError> {
+pub fn simulate(graph: &ResourceGraph, scenario: &Scenario) -> Result<FailureChain, SimulateError> {
     let solver = Solver::new();
     let mut enc = Encoder::new();
     enc.encode_availability(graph, &solver);
@@ -40,8 +37,7 @@ mod tests {
     use crate::{Scenario, ScenarioKind};
     use helios_graph::from_json;
 
-    const FIXTURE: &str =
-        include_str!("../../../fixtures/three-tier-webapp/terraform-show.json");
+    const FIXTURE: &str = include_str!("../../../fixtures/three-tier-webapp/terraform-show.json");
 
     #[test]
     fn simulate_az_outage_returns_failure_chain() {

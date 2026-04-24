@@ -72,8 +72,8 @@ fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path) -> Result<(
     let graph = helios_graph::load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
-    let chain = helios_engine::simulate(&graph, &scenario)
-        .map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
+    let chain =
+        helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
     print!("{}", chain.render_plain());
     if !chain.is_safe() {
         std::process::exit(1);

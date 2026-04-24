@@ -23,7 +23,11 @@ pub fn solver_smoke() -> SatResult {
 /// "us-east-1a" → "us-east-1". Handles any AZ suffix char.
 pub(crate) fn region_of_az(az: &str) -> String {
     let bytes = az.as_bytes();
-    if bytes.last().map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
+    if bytes
+        .last()
+        .map(|c| c.is_ascii_alphabetic())
+        .unwrap_or(false)
+    {
         az[..az.len() - 1].to_string()
     } else {
         az.to_string()
@@ -259,8 +263,7 @@ mod encode_tests {
     use crate::{Scenario, ScenarioKind};
     use helios_graph::from_json;
 
-    const FIXTURE: &str =
-        include_str!("../../../fixtures/three-tier-webapp/terraform-show.json");
+    const FIXTURE: &str = include_str!("../../../fixtures/three-tier-webapp/terraform-show.json");
 
     fn build_graph() -> ResourceGraph {
         from_json(FIXTURE).expect("fixture parses")
@@ -359,7 +362,10 @@ mod encode_tests {
         let chain = enc.extract_failures(&graph, &scenario, &solver);
 
         let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
-        assert!(ids.contains(&"aws_subnet.public_a"), "subnet in 1a must fail");
+        assert!(
+            ids.contains(&"aws_subnet.public_a"),
+            "subnet in 1a must fail"
+        );
         assert!(ids.contains(&"aws_instance.web"), "ec2 in 1a must fail");
         assert!(
             !ids.contains(&"aws_subnet.public_b"),
