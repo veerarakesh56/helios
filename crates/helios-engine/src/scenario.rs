@@ -20,6 +20,17 @@ pub enum ScenarioKind {
     AzOutage { az: String },
     /// An entire AWS region goes dark.
     RegionOutage { region: String },
+    /// An IAM principal (role ARN) is revoked. Resources whose attrs name
+    /// that principal (`iam_role_arn` or `role_arn`) lose access and fail.
+    /// v0.1 is a string match — v0.2 models IAM in the graph directly.
+    IamRevocation { principal_arn: String },
+    /// A multi-AZ RDS's failover window stretches past SLO — during that
+    /// window the DB is unreachable. Modeled as forcing that specific
+    /// resource down; dependents propagate via Contains edges.
+    SlowRdsFailover { db_id: String },
+    /// A single NAT gateway dies. Modeled via the subnet it sits in: the
+    /// subnet loses egress, which knocks out every instance inside it.
+    SingleNatDeath { subnet_id: String },
 }
 
 #[derive(Debug, Error)]
@@ -74,9 +85,40 @@ mod tests {
 
     #[test]
     fn unknown_kind_errors() {
-        let yaml = "name: x\nkind:\n  type: iam-revocation\n  principal: admin\n";
+        let yaml = "name: x\nkind:\n  type: solar-flare\n  radius: 5000\n";
         let res: Result<Scenario, _> = serde_yaml_ng::from_str(yaml);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn parses_iam_revocation() {
+        let yaml = "name: revoke-web\nkind:\n  type: iam-revocation\n  principal_arn: arn:aws:iam::1:role/web\n";
+        let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(matches!(s.kind, ScenarioKind::IamRevocation { .. }));
+    }
+
+    #[test]
+    fn parses_slow_rds_failover() {
+        let yaml = "name: rds-slow\nkind:\n  type: slow-rds-failover\n  db_id: aws_db_instance.primary\n";
+        let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(
+            s.kind,
+            ScenarioKind::SlowRdsFailover {
+                db_id: "aws_db_instance.primary".into()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_single_nat_death() {
+        let yaml = "name: nat-dead\nkind:\n  type: single-nat-death\n  subnet_id: aws_subnet.public_a\n";
+        let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(
+            s.kind,
+            ScenarioKind::SingleNatDeath {
+                subnet_id: "aws_subnet.public_a".into()
+            }
+        );
     }
 
     #[test]
