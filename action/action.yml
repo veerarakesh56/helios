@@ -28,8 +28,8 @@ inputs:
     default: fixtures/three-tier-webapp
   github-token:
     description: >
-      Token used to post the PR comment. Needs `pull-requests: write`.
-      Defaults to ${{ github.token }} from the calling workflow.
+      Token used to post the PR comment. Needs pull-requests:write. Pass
+      secrets.GITHUB_TOKEN (or github.token) from the calling workflow.
     required: true
   artifact-name:
     description: Name of the workflow artifact holding inspect JSONs.
