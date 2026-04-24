@@ -28,3 +28,12 @@ def test_az_outage_fixture_details() -> None:
     ids = [f.id for f in chain.failures]
     assert "aws_instance.web" in ids
     assert "aws_subnet.public_a" in ids
+
+
+def test_glossary_mentions_every_model_variant() -> None:
+    from helios_ai.glossary import AVAILABILITY_MODEL_GLOSSARY
+
+    for variant in ("SingleAz", "MultiAz", "Regional", "GlobalEdge"):
+        assert variant in AVAILABILITY_MODEL_GLOSSARY, variant
+    # Must be large enough to benefit from prompt caching (~1024 tokens min).
+    assert len(AVAILABILITY_MODEL_GLOSSARY) > 2000
