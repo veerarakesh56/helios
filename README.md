@@ -27,6 +27,12 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) (coming Weekend 2) and [`docs/ai-boun
 | 5 | GitHub Action + cytoscape.js web UI |
 | 6 | Demo GIF, docs, v0.1.0 release |
 
+## Weekend 2 — Engine v0 ✅
+
+- Z3-backed SMT encoding for `region-outage` + `az-outage` scenarios.
+- First E2E: `helios simulate fixtures/three-tier-webapp --scenario fixtures/scenarios/az-outage.yaml` prints the failure chain.
+- Scenario schema documented in [`docs/scenarios.md`](docs/scenarios.md).
+
 ## License
 
 Apache-2.0. See [`LICENSE`](./LICENSE).
