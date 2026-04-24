@@ -42,3 +42,24 @@ Add a new scenario by creating a YAML file in `fixtures/scenarios/` and running:
 ```bash
 helios simulate <tf-dir> --scenario fixtures/scenarios/<name>.yaml
 ```
+
+## JSON output
+
+Pass `--json` to emit the `FailureChain` as JSON on stdout instead of the default pretty text:
+
+```bash
+helios simulate <tf-dir> --scenario fixtures/scenarios/<name>.yaml --json
+```
+
+Shape:
+
+```json
+{
+  "scenario": "lose-us-east-1a",
+  "failures": [
+    { "id": "aws_instance.web", "kind": "Instance", "reason": "single-AZ in us-east-1a, which is down" }
+  ]
+}
+```
+
+Authoritative schema: `helios_engine::report::{FailureChain, FailedResource}` in [`crates/helios-engine/src/report.rs`](../crates/helios-engine/src/report.rs). Consumed by [`helios-ai`](../helios-ai/) to produce human-readable narratives.
