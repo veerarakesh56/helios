@@ -31,11 +31,40 @@ kind:
 
 Takes an entire region offline. Only `GlobalEdge` resources survive.
 
-## Kinds coming in Weekend 4
+### `iam-revocation`
 
-- `iam-revocation` — revoke a principal's permissions
-- `slow-rds-failover` — RDS failover exceeds its SLO window
-- `single-nat-death` — the single NAT gateway in an AZ dies
+```yaml
+kind:
+  type: iam-revocation
+  principal_arn: arn:aws:iam::123456789012:role/web
+```
+
+Fails any resource whose `attrs.iam_role_arn` or `attrs.role_arn` matches the
+principal. v0.1 is a string match over the Terraform-JSON attr set; v0.2
+models IAM as graph nodes so multi-hop policy chains propagate.
+
+### `slow-rds-failover`
+
+```yaml
+kind:
+  type: slow-rds-failover
+  db_id: aws_db_instance.primary
+```
+
+Models a multi-AZ RDS whose failover window exceeds its SLO: during the
+window the DB is unreachable and dependents inherit the failure via
+`Contains` edges.
+
+### `single-nat-death`
+
+```yaml
+kind:
+  type: single-nat-death
+  subnet_id: aws_subnet.public_a
+```
+
+Treats the subnet as having lost egress. Every resource inside it fails;
+NAT itself is not yet a graph node (v0.2 work).
 
 Add a new scenario by creating a YAML file in `fixtures/scenarios/` and running:
 

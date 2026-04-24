@@ -1,5 +1,8 @@
-"""Thin argparse shell. `python -m helios_ai explain` reads FailureChain
-JSON on stdin and writes a markdown narrative on stdout.
+"""Thin argparse shell. Two subcommands share the same stdin/stdout pipe shape.
+
+- `explain` — reads FailureChain JSON on stdin, writes markdown narrative.
+- `propose-fix` — reads {chain, attrs_snapshot} JSON on stdin, writes a
+  FixProposal JSON object on stdout.
 
 If HELIOS_AI_MOCK=1 is set, a canned fake client is used instead of the
 real Anthropic SDK — used by the Rust end-to-end smoke test and anyone
@@ -9,11 +12,13 @@ running the CLI without an API key.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from typing import Any
 
 from .explain import explain
+from .fix_generator import propose_fix
 from .models import FailureChain
 
 
@@ -35,6 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="helios-ai")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("explain", help="Read FailureChain JSON on stdin, write narrative on stdout.")
+    sub.add_parser(
+        "propose-fix",
+        help="Read {chain, attrs_snapshot} JSON on stdin, write FixProposal JSON on stdout.",
+    )
     args = parser.parse_args(argv)
 
     if args.cmd == "explain":
@@ -42,6 +51,17 @@ def main(argv: list[str] | None = None) -> int:
         chain = FailureChain.model_validate_json(raw)
         client = _build_client()
         sys.stdout.write(explain(chain, client=client))
+        sys.stdout.write("\n")
+        return 0
+
+    if args.cmd == "propose-fix":
+        raw = sys.stdin.read()
+        payload = json.loads(raw)
+        chain = FailureChain.model_validate(payload["chain"])
+        attrs_snapshot = payload.get("attrs_snapshot", {})
+        client = _build_client()
+        fix = propose_fix(chain, attrs_snapshot=attrs_snapshot, client=client)
+        sys.stdout.write(fix.model_dump_json(indent=2))
         sys.stdout.write("\n")
         return 0
 

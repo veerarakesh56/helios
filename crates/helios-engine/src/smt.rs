@@ -134,7 +134,15 @@ impl Encoder {
     }
 
     /// Apply a [`crate::Scenario`] to the solver by forcing the right Bool(s) true.
-    pub fn apply_scenario(&mut self, scenario: &crate::Scenario, solver: &Solver) {
+    ///
+    /// Needs `graph` so targeted-resource kinds (slow-rds-failover,
+    /// single-nat-death, iam-revocation) can look up the affected nodes.
+    pub fn apply_scenario(
+        &mut self,
+        scenario: &crate::Scenario,
+        graph: &ResourceGraph,
+        solver: &Solver,
+    ) {
         match &scenario.kind {
             crate::ScenarioKind::AzOutage { az } => {
                 let v = self.az_var(az);
@@ -146,6 +154,28 @@ impl Encoder {
             crate::ScenarioKind::RegionOutage { region } => {
                 let v = self.region_var(region);
                 solver.assert(&v);
+            }
+            crate::ScenarioKind::SlowRdsFailover { db_id }
+            | crate::ScenarioKind::SingleNatDeath { subnet_id: db_id } => {
+                // Force that specific resource down; dependents propagate.
+                if let Some(idx) = graph.node_indices().find(|i| &graph[*i].id == db_id) {
+                    if let Some(down) = self.resource_down.get(&idx) {
+                        solver.assert(down);
+                    }
+                }
+            }
+            crate::ScenarioKind::IamRevocation { principal_arn } => {
+                // v0.1: string-match iam_role_arn / role_arn on resource attrs.
+                for (idx, down) in &self.resource_down {
+                    let r: &Resource = &graph[*idx];
+                    let hit = r.attrs.get("iam_role_arn").and_then(|v| v.as_str())
+                        == Some(principal_arn.as_str())
+                        || r.attrs.get("role_arn").and_then(|v| v.as_str())
+                            == Some(principal_arn.as_str());
+                    if hit {
+                        solver.assert(down);
+                    }
+                }
             }
         }
     }
@@ -212,6 +242,15 @@ fn reason_for(r: &Resource, scenario: &crate::Scenario) -> String {
             AvailabilityModel::Regional { region },
             crate::ScenarioKind::RegionOutage { region: r },
         ) if region == r => format!("regional in {region}, which is down"),
+        (_, crate::ScenarioKind::SlowRdsFailover { db_id }) if db_id == &r.id => {
+            format!("RDS {db_id} failover window exceeded SLO — treated as unavailable")
+        }
+        (_, crate::ScenarioKind::SingleNatDeath { subnet_id }) if subnet_id == &r.id => {
+            format!("NAT in subnet {subnet_id} is dead — subnet loses egress")
+        }
+        (_, crate::ScenarioKind::IamRevocation { principal_arn }) => {
+            format!("principal {principal_arn} was revoked")
+        }
         _ => "failure propagated from a dependency".to_string(),
     }
 }
@@ -356,7 +395,7 @@ mod encode_tests {
                 az: "us-east-1a".into(),
             },
         };
-        enc.apply_scenario(&scenario, &solver);
+        enc.apply_scenario(&scenario, &graph, &solver);
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -374,6 +413,99 @@ mod encode_tests {
     }
 
     #[test]
+    fn slow_rds_failover_forces_the_db_down() {
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "rds-slow".into(),
+            kind: ScenarioKind::SlowRdsFailover {
+                db_id: "aws_db_instance.primary".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        assert!(
+            chain
+                .failures
+                .iter()
+                .any(|f| f.id == "aws_db_instance.primary"),
+            "rds must be down; got {:?}",
+            chain.failures
+        );
+    }
+
+    #[test]
+    fn single_nat_death_takes_subnet_and_children_down() {
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "nat-1a-dead".into(),
+            kind: ScenarioKind::SingleNatDeath {
+                subnet_id: "aws_subnet.public_a".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert!(ids.contains(&"aws_subnet.public_a"));
+        assert!(
+            ids.contains(&"aws_instance.web"),
+            "web depends on public_a; must fall; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn iam_revocation_hits_resources_with_matching_role_arn() {
+        // Build a fixture graph, then inject an iam_role_arn into one node
+        // to prove the string-match path. We roll a mini in-memory graph so
+        // we don't need to touch the shipped fixture.
+        let mut graph = build_graph();
+        let role_arn = "arn:aws:iam::123:role/web";
+        let web_idx = graph
+            .node_indices()
+            .find(|i| graph[*i].id == "aws_instance.web")
+            .unwrap();
+        graph[web_idx]
+            .attrs
+            .as_object_mut()
+            .unwrap()
+            .insert("iam_role_arn".into(), serde_json::json!(role_arn));
+
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "revoke-web".into(),
+            kind: ScenarioKind::IamRevocation {
+                principal_arn: role_arn.into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert!(
+            ids.contains(&"aws_instance.web"),
+            "web should fail after its role is revoked; got {ids:?}"
+        );
+    }
+
+    #[test]
     fn region_outage_takes_everything_down_except_global() {
         let graph = build_graph();
         let solver = Solver::new();
@@ -387,7 +519,7 @@ mod encode_tests {
                 region: "us-east-1".into(),
             },
         };
-        enc.apply_scenario(&scenario, &solver);
+        enc.apply_scenario(&scenario, &graph, &solver);
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
