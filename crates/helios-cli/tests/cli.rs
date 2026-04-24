@@ -111,6 +111,79 @@ fn explain_subcommand_pipes_stdin_to_python() {
 }
 
 #[test]
+fn verify_with_resolving_fix_reports_resolved_section() {
+    let root = repo_root();
+    let tmp = tempfile::tempdir().unwrap();
+    let fix_path = tmp.path().join("fix.json");
+    std::fs::write(
+        &fix_path,
+        r#"{
+            "scenario_name": "lose-us-east-1a",
+            "explanation": "move cache to us-east-1b",
+            "edits": [
+                {"op":"set_attr","resource_id":"aws_elasticache_cluster.cache","key":"availability_zone","value":"us-east-1b"}
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args([
+            "verify",
+            "fixtures/three-tier-webapp",
+            "--scenario",
+            "fixtures/scenarios/az-outage.yaml",
+            "--fix",
+        ])
+        .arg(&fix_path)
+        .output()
+        .expect("failed to spawn helios verify");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Resolved")
+            && stdout.contains("aws_elasticache_cluster.cache"),
+        "expected Resolved section naming cache; got:\n{stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Some failures remain (subnet + instance), so exit code is non-zero.
+    assert!(!output.status.success(), "expected non-zero exit (remaining failures)");
+}
+
+#[test]
+fn verify_rejects_fix_naming_unknown_resource() {
+    let root = repo_root();
+    let tmp = tempfile::tempdir().unwrap();
+    let fix_path = tmp.path().join("bad.json");
+    std::fs::write(
+        &fix_path,
+        r#"{"scenario_name":"x","explanation":"x","edits":[{"op":"set_attr","resource_id":"aws_nope.ghost","key":"foo","value":1}]}"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args([
+            "verify",
+            "fixtures/three-tier-webapp",
+            "--scenario",
+            "fixtures/scenarios/az-outage.yaml",
+            "--fix",
+        ])
+        .arg(&fix_path)
+        .output()
+        .expect("spawn helios verify");
+
+    assert!(!output.status.success(), "expected non-zero exit on unknown resource");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown resource") || stderr.contains("aws_nope.ghost"),
+        "expected unknown-resource error; stderr: {stderr}"
+    );
+}
+
+#[test]
 fn simulate_plain_still_works() {
     let root = repo_root();
     let output = Command::new(env!("CARGO_BIN_EXE_helios"))
