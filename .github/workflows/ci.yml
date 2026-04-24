@@ -25,6 +25,15 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.x"
+
+      - name: Sync helios-ai venv (needed by the Rust e2e pipe test)
+        run: uv sync --frozen
+        working-directory: helios-ai
+
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
@@ -38,3 +47,26 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  python-check:
+    name: python / ruff / pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: helios-ai
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.x"
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: ruff check
+        run: uv run ruff check
+
+      - name: pytest
+        run: uv run pytest -v
