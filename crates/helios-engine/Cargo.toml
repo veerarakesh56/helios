@@ -13,6 +13,12 @@ helios-graph.workspace = true
 helios-models.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 thiserror.workspace = true
+anyhow.workspace = true
 tracing.workspace = true
-# z3 = { version = "0.12", features = ["gh-release"] }  # wired up Weekend 2
+petgraph.workspace = true
+z3 = { version = "0.20", features = ["gh-release"] }
+
+[dev-dependencies]
+pretty_assertions.workspace = true
