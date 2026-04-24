@@ -1,8 +1,10 @@
-"""Static reference text describing how Helios models AWS resource availability.
+"""Static reference text describing how Helios models AWS resource availability
+and the scenarios the engine supports.
 
-Included verbatim in every explain() prompt, cache-marked. The text must
-stay aligned with the `AvailabilityModel` enum in
-`helios/crates/helios-models/src/lib.rs` — when new variants or
+Included verbatim in every explain() and propose_fix() prompt, cache-marked.
+The text must stay aligned with the `AvailabilityModel` enum in
+`helios/crates/helios-models/src/lib.rs` and the `ScenarioKind` enum in
+`helios/crates/helios-engine/src/scenario.rs` — when new variants or
 failover semantics are added, update here in the same PR.
 """
 
@@ -49,6 +51,26 @@ kinds: aws_s3_bucket (global namespace), CloudFront (future).
   instance in that subnet fails.)
 - `MemberOf` edges do NOT propagate (over-constrains Regional
   resources like Lambda-in-VPC).
+
+## Scenario kinds (v0.1)
+
+- **az-outage** { az }: a single availability zone is offline. SingleAz
+  resources in that AZ fail; MultiAz resources survive if any of their AZs
+  is still up; Regional/GlobalEdge unaffected.
+- **region-outage** { region }: an entire region offline. Only GlobalEdge
+  resources survive.
+- **iam-revocation** { principal_arn }: a role/principal is revoked.
+  v0.1 is a string match on `attrs.iam_role_arn` or `attrs.role_arn`; any
+  resource naming that principal fails (dependents cascade via Contains).
+- **slow-rds-failover** { db_id }: a multi-AZ RDS's failover exceeds its
+  SLO window. The target DB is treated as unavailable; dependents fail.
+- **single-nat-death** { subnet_id }: the subnet's NAT gateway dies.
+  Subnet loses egress; every instance inside it fails.
+
+When proposing fixes, propose the minimal set of `set_attr` edits that
+resolve the failure chain while preserving AWS semantics (e.g. enabling
+`multi_az` on an RDS, moving a SingleAz service to a different AZ, or
+widening an ALB's `availability_zones` list).
 
 ## Reading a FailureChain
 

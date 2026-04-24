@@ -97,11 +97,43 @@ fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool)
 }
 
 fn cmd_verify(
-    _input: &std::path::Path,
-    _scenario: &std::path::Path,
-    _fix: &std::path::Path,
+    input: &std::path::Path,
+    scenario: &std::path::Path,
+    fix: &std::path::Path,
 ) -> Result<()> {
-    anyhow::bail!("`helios verify` lands Weekend 4 (fix generation + re-simulation)")
+    let graph = helios_graph::load(input)?;
+    let scenario = helios_engine::scenario::load(scenario)
+        .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
+    let fix = helios_engine::fix::load(fix).map_err(|e| anyhow::anyhow!("loading fix: {e}"))?;
+    let report = helios_engine::verify(&graph, &scenario, &fix)
+        .map_err(|e| anyhow::anyhow!("verify: {e}"))?;
+
+    println!("Scenario: {}", report.pre_fix.scenario);
+    println!("Pre-fix failures:  {}", report.pre_fix.failures.len());
+    println!("Post-fix failures: {}", report.post_fix.failures.len());
+
+    if !report.resolved.is_empty() {
+        println!("\nResolved ({}):", report.resolved.len());
+        for r in &report.resolved {
+            println!("  [OK] {r}");
+        }
+    }
+    if !report.new_failures.is_empty() {
+        println!("\nNew failures introduced ({}):", report.new_failures.len());
+        for n in &report.new_failures {
+            println!("  [NEW] {n}");
+        }
+    }
+    if !report.remaining.is_empty() {
+        println!("\nStill failing ({}):", report.remaining.len());
+        for r in &report.remaining {
+            println!("  [--] {r}");
+        }
+    }
+    if !report.is_safe() {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// Shell out to `python -m helios_ai explain`, piping stdin through and stdout back.

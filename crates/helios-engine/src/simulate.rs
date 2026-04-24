@@ -22,7 +22,7 @@ pub fn simulate(graph: &ResourceGraph, scenario: &Scenario) -> Result<FailureCha
     let mut enc = Encoder::new();
     enc.encode_availability(graph, &solver);
     enc.encode_dependencies(graph, &solver);
-    enc.apply_scenario(scenario, &solver);
+    enc.apply_scenario(scenario, graph, &solver);
 
     match solver.check() {
         SatResult::Sat => Ok(enc.extract_failures(graph, scenario, &solver)),
