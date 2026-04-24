@@ -29,6 +29,9 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         scenario: PathBuf,
+        /// Emit FailureChain as JSON on stdout instead of plain text.
+        #[arg(long)]
+        json: bool,
     },
     /// Re-run simulation with a proposed fix applied and confirm it resolves failures.
     Verify {
@@ -49,7 +52,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Plan { input } => cmd_plan(&input),
-        Command::Simulate { input, scenario } => cmd_simulate(&input, &scenario),
+        Command::Simulate {
+            input,
+            scenario,
+            json,
+        } => cmd_simulate(&input, &scenario, json),
         Command::Verify {
             input,
             scenario,
@@ -68,13 +75,18 @@ fn cmd_plan(input: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
+fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool) -> Result<()> {
     let graph = helios_graph::load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let chain =
         helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
-    print!("{}", chain.render_plain());
+    if json {
+        serde_json::to_writer_pretty(std::io::stdout().lock(), &chain)?;
+        println!();
+    } else {
+        print!("{}", chain.render_plain());
+    }
     if !chain.is_safe() {
         std::process::exit(1);
     }
