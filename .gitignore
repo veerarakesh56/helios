@@ -14,6 +14,7 @@ __pycache__/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Terraform working state — never commit
 *.tfstate
@@ -44,5 +45,6 @@ aws-credentials
 
 # Helios artifacts
 /reports/
-/fixes/
 *.helios.json
+# `fixes/` holds committed example FixProposals consumed by the GitHub Action.
+# User-supplied fixes belong outside the repo or under a path not in scenarios.

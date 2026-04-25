@@ -41,6 +41,12 @@ enum Command {
         #[arg(long)]
         fix: PathBuf,
     },
+    /// Emit a combined `{graph, chain}` JSON document for the web viewer / GitHub Action.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        scenario: PathBuf,
+    },
     /// Narrate a FailureChain (read as JSON on stdin) via the helios-ai Python shell.
     Explain,
 }
@@ -64,6 +70,7 @@ fn main() -> Result<()> {
             scenario,
             fix,
         } => cmd_verify(&input, &scenario, &fix),
+        Command::Inspect { input, scenario } => cmd_inspect(&input, &scenario),
         Command::Explain => cmd_explain(),
     }
 }
@@ -133,6 +140,18 @@ fn cmd_verify(
     if !report.is_safe() {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
+    let graph = helios_graph::load(input)?;
+    let scenario = helios_engine::scenario::load(scenario)
+        .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
+    let chain =
+        helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
+    let doc = helios_engine::build_inspect(&graph, chain);
+    serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
+    println!();
     Ok(())
 }
 
