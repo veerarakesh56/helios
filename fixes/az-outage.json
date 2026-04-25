@@ -1,7 +1,19 @@
 {
   "scenario_name": "lose-us-east-1a",
-  "explanation": "Move the cache to us-east-1b so it survives a us-east-1a outage. Subnet/instance are still single-AZ in us-east-1a; full multi-AZ rebalance is a follow-up.",
+  "explanation": "Move every us-east-1a-pinned single-AZ resource to us-east-1b so the AZ outage no longer takes them down. In production you would add new resources in a second AZ via add_resource (deferred to v0.2); for v0.1 the attr move is enough to demonstrate the engine re-verification loop.",
   "edits": [
+    {
+      "op": "set_attr",
+      "resource_id": "aws_subnet.public_a",
+      "key": "availability_zone",
+      "value": "us-east-1b"
+    },
+    {
+      "op": "set_attr",
+      "resource_id": "aws_instance.web",
+      "key": "availability_zone",
+      "value": "us-east-1b"
+    },
     {
       "op": "set_attr",
       "resource_id": "aws_elasticache_cluster.cache",
