@@ -1,0 +1,12 @@
+{
+  "scenario_name": "lose-us-east-1a",
+  "explanation": "Move the cache to us-east-1b so it survives a us-east-1a outage. Subnet/instance are still single-AZ in us-east-1a; full multi-AZ rebalance is a follow-up.",
+  "edits": [
+    {
+      "op": "set_attr",
+      "resource_id": "aws_elasticache_cluster.cache",
+      "key": "availability_zone",
+      "value": "us-east-1b"
+    }
+  ]
+}

@@ -241,6 +241,50 @@ fn verify_rejects_fix_naming_unknown_resource() {
 }
 
 #[test]
+fn inspect_emits_combined_graph_and_chain_json() {
+    let root = repo_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args([
+            "inspect",
+            "fixtures/three-tier-webapp",
+            "--scenario",
+            "fixtures/scenarios/az-outage.yaml",
+        ])
+        .output()
+        .expect("failed to spawn helios inspect");
+
+    assert!(
+        output.status.success(),
+        "inspect should exit 0 even with failures present; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout not valid JSON: {e}\nstdout: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    });
+
+    assert_eq!(parsed["scenario"], "lose-us-east-1a");
+    assert!(parsed["graph"]["nodes"].is_array());
+    assert!(parsed["graph"]["edges"].is_array());
+    assert!(parsed["chain"]["failures"].is_array());
+
+    let nodes = parsed["graph"]["nodes"].as_array().unwrap();
+    let edges = parsed["graph"]["edges"].as_array().unwrap();
+    assert!(!nodes.is_empty(), "expected nodes, got empty");
+    assert!(!edges.is_empty(), "expected edges, got empty");
+
+    // Schema spot-checks: nodes have id/kind/attrs, edges have from/to/dep with kind+via.
+    assert!(nodes[0]["id"].is_string());
+    assert!(nodes[0]["kind"].is_string());
+    assert!(edges[0]["dep"]["kind"].is_string());
+    assert!(edges[0]["dep"]["via"].is_string());
+}
+
+#[test]
 fn simulate_plain_still_works() {
     let root = repo_root();
     let output = Command::new(env!("CARGO_BIN_EXE_helios"))
