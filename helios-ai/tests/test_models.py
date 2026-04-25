@@ -30,6 +30,28 @@ def test_az_outage_fixture_details() -> None:
     assert "aws_subnet.public_a" in ids
 
 
+def test_inspect_doc_round_trips_real_rust_output() -> None:
+    """The Pydantic mirror must accept the JSON `helios inspect` actually emits."""
+    from helios_ai.models import InspectDoc
+
+    raw = json.loads((FIXTURES / "az_outage_inspect.json").read_text())
+    doc = InspectDoc.model_validate(raw)
+
+    assert doc.scenario == "lose-us-east-1a"
+    assert len(doc.graph.nodes) > 0
+    assert len(doc.graph.edges) > 0
+    assert len(doc.chain.failures) > 0
+
+    # Edge.dep.kind is one of the two known variants.
+    for e in doc.graph.edges:
+        assert e.dep.kind in ("Contains", "MemberOf")
+        assert e.dep.via  # non-empty attr name
+
+    # Round-trip: dump → reload → equal. `by_alias=True` re-emits `from`.
+    redumped = doc.model_dump(by_alias=True)
+    assert redumped == raw
+
+
 def test_glossary_mentions_every_model_variant() -> None:
     from helios_ai.glossary import AVAILABILITY_MODEL_GLOSSARY
 
