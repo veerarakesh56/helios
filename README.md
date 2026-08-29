@@ -1,15 +1,54 @@
 # Helios
 
 > Deterministic failure simulation for cloud infrastructure.
-> Proves exactly which services break under declared failure scenarios -- *before* `terraform apply`.
+> Proves exactly which services break under a declared failure — *before* `terraform apply`.
 
 ![demo](docs/demo.gif)
 
-**Status:** v0.1.0. Eight AWS resource kinds, five scenario kinds, GitHub Action, web viewer.
+**Status:** v0.1.0 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
+that gates pull requests, and a web viewer. **74 tests (56 Rust, 18 Python), CI green.**
+
+| | |
+|---|---|
+| **Engine** | Rust + **Z3 SMT** — every verdict is solved for, never estimated |
+| **AI shell** | Python + Claude — narrates counter-examples and proposes Terraform fixes |
+| **The boundary** | the model never produces a verdict; **every AI-proposed fix is re-simulated by the engine before it counts** |
+| **Input** | `terraform show -json` output |
+| **Scenarios** | AZ outage · region outage · IAM revocation · single-NAT death · slow RDS failover |
+| **Resources** | VPC · Subnet · Instance · Load balancer · RDS instance · ElastiCache cluster · Lambda · S3 |
+| **CI** | a composite GitHub Action posts one sticky PR comment with the verdict per scenario |
+
+## The problem
+
+You cannot test an availability-zone outage. You can reason about one, draw it on a whiteboard, and
+be confident — and confidence is exactly the thing that fails at 3 a.m. The infrastructure that broke
+was usually reviewed by someone competent who traced the dependency chain in their head and missed
+one edge.
+
+Asking an LLM instead does not fix it. Given a Terraform file and *"what breaks if we lose an AZ?"*, a
+model will always produce a confident, plausible answer. Plausible is not the same as correct, and in
+availability work the difference only shows up during an incident.
+
+**Helios does not reason about the failure. It solves for it.** The graph and the scenario become an
+SMT problem, Z3 executes the failure symbolically, and what comes back is a proof, not an opinion.
 
 ## What it does
 
-Point Helios at your Terraform code. Describe a failure as YAML (e.g. *"us-east-1 loses one AZ for 45 minutes"*). Helios parses everything into a typed resource graph, uses Z3 to symbolically execute the failure through the graph, and returns the exact failure chains with auto-generated Terraform fixes that it has **proved** resolve the failure (by re-simulating).
+```
+terraform show -json  ─┐
+                       ├─►  typed resource graph  ─►  Z3  ─►  failure chain
+scenario.yaml         ─┘                                          │
+                                                                  ▼
+                                              Claude narrates it, proposes a fix
+                                                                  │
+                                                                  ▼
+                                              engine RE-SIMULATES with the fix applied
+                                              Resolved / Still failing / New failures introduced
+```
+
+The last step is the point. A fix the model suggests is not trusted because it sounds right — it is
+applied to a clone of the graph, re-solved, and reported as `Resolved`, `Still failing` or
+`New failures introduced`, exiting non-zero if anything still fails.
 
 ## Quickstart
 
@@ -18,80 +57,134 @@ git clone https://github.com/veerarakesh56/helios && cd helios
 make demo
 ```
 
-`make demo` simulates an AZ outage against the bundled three-tier webapp fixture, narrates the failure chain via the AI shell, applies a structured fix proposal, and re-verifies. Set `HELIOS_AI_MOCK=1` for a no-network run.
+`make demo` simulates an AZ outage against the bundled three-tier webapp fixture, narrates the
+failure chain through the AI shell, applies a structured fix proposal, and re-verifies.
+Set `HELIOS_AI_MOCK=1` for a no-network run.
 
-For a real run, set `ANTHROPIC_API_KEY` and point `HELIOS_AI_PYTHON` at the interpreter that has `helios_ai` installed (e.g. `helios-ai/.venv/bin/python`).
+For a real run, set `ANTHROPIC_API_KEY` and point `HELIOS_AI_PYTHON` at the interpreter that has
+`helios_ai` installed (e.g. `helios-ai/.venv/bin/python`).
 
-## Architecture at a glance
+## Commands
 
-- **Rust + Z3** engine -- correctness is non-negotiable, so verdicts come from an SMT solver.
-- **Python + Claude** shell -- narration, fix proposals, natural-language scenario parsing. The shell never decides what is safe; it only makes rigorous results human-readable.
+```bash
+helios plan     <tf-json-dir>                             # resource and edge counts
+helios simulate <tf-json> --scenario <yaml> [--json]      # run the engine, print the failure chain
+helios explain  < chain.json                              # Claude narrates it, via the Python shell
+helios verify   <tf-json> --scenario <yaml> --fix <json>  # re-simulate with the fix, diff the result
+helios inspect  <tf-json> --scenario <yaml>               # {scenario, graph, chain} for viewer/Action
+```
 
-See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the deep dive and [`docs/ai-boundary.md`](./docs/ai-boundary.md) for why the AI shell never produces a safety verdict.
+Pipe them:
 
-## Roadmap (v0.1)
+```bash
+helios simulate ./infra --scenario scenarios/az-outage.yaml --json | helios explain
+```
 
-| Weekend | Milestone |
+## Scenarios
+
+Five kinds ship in `fixtures/scenarios/`, each a small YAML document (schema in
+[`docs/scenarios.md`](docs/scenarios.md)):
+
+| Scenario | Asks |
 |---|---|
-| 1 | Cargo workspace, graph builder, 8 AWS resource types |
-| 2 | Z3 engine, region + AZ outage scenarios |
-| 3 | Claude-powered explanation layer with prompt caching |
-| 4 | Claude-proposed Terraform fixes, engine-verified |
-| 5 | GitHub Action + cytoscape.js web UI |
-| 6 | Demo GIF, docs, v0.1.0 release |
+| `az-outage` | one availability zone disappears for a stated duration |
+| `region-outage` | an entire region goes |
+| `iam-revocation` | a role or policy is pulled |
+| `single-nat-death` | the one NAT gateway everything egresses through dies |
+| `slow-rds-failover` | the database fails over, but not quickly |
 
-## Weekend 2 -- Engine v0
+Adding a scenario kind or an AWS resource type is the easiest first contribution — see
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
-- Z3-backed SMT encoding for `region-outage` + `az-outage` scenarios.
-- First E2E: `helios simulate fixtures/three-tier-webapp --scenario fixtures/scenarios/az-outage.yaml` prints the failure chain.
-- Scenario schema documented in [`docs/scenarios.md`](docs/scenarios.md).
+## Fix generation, and why it is verified
 
-## Weekend 3 -- Claude explain layer
+`helios-ai propose-fix` reads `{chain, attrs_snapshot}` on stdin and returns a structured
+`FixProposal` (`{scenario_name, explanation, edits[]}`) from Claude using `output_config.format` and
+a two-breakpoint prompt cache — so the *shape* of a fix is enforced by the type, not by the prompt.
 
-- `helios simulate ... --json` emits the `FailureChain` as JSON on stdout.
-- `helios-ai/` is a uv-managed Python package that reads that JSON on stdin and writes a human-readable markdown narrative on stdout via Claude, with prompt caching on the system prompt + availability-model glossary.
-- `helios explain` shells out to `python -m helios_ai explain` so you can pipe end-to-end:
+`helios verify` then applies those edits to a clone of the graph and re-runs the solver. It prints
+`Pre-fix failures` / `Post-fix failures` and the three sections that matter — `Resolved`,
+`Still failing`, `New failures introduced` — exiting non-zero if anything still fails.
 
-  ```bash
-  helios simulate ./infra --scenario scenarios/az-outage.yaml --json | helios explain
-  ```
+**A fix that introduces a new failure is caught by the engine, not by a reviewer.**
 
-  Set `ANTHROPIC_API_KEY` in the environment, and set `HELIOS_AI_PYTHON` to point at the Python interpreter that has `helios_ai` installed if it is not on `PATH`.
+## GitHub Action
 
-- See [`helios-ai/`](helios-ai/) for the Python side and [`docs/ai-boundary.md`](docs/ai-boundary.md) for why Claude only narrates and never decides.
+[`action/`](./action) is a composite action. It runs every scenario in `fixtures/scenarios/*.yaml`,
+optionally re-runs `helios verify` when a matching `fixes/<scenario>.json` is committed, uploads each
+`inspect` JSON as a workflow artifact, and posts **one sticky PR comment** summarising the verdict —
+a collapsible `<details>` per scenario. It caches the prebuilt binary on `Cargo.lock` + crate
+sources, so the second run on a PR is fast.
 
-## Weekend 4 -- Fix generation + verify loop
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  helios:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: veerarakesh56/helios/action@v0.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
 
-- `helios-ai propose-fix` reads `{chain, attrs_snapshot}` JSON on stdin and emits a structured `FixProposal` (`{scenario_name, explanation, edits[]}`) via Claude with `output_config.format` and a two-breakpoint cache.
-- `helios verify <tf-json> --scenario <yaml> --fix <json>` re-simulates with the fix applied and reports `Resolved` / `Still failing` / `New failures introduced` sections, exiting non-zero if anything still fails.
+## Web viewer
 
-## Weekend 5 -- GitHub Action + web viewer
+[`web/`](./web) is a Vite + React + cytoscape.js single-page app. `npm run dev` for local dev,
+`npm run build` for a static bundle. Drop a `helios inspect` JSON into the file picker: failed
+resources render red, `Contains` edges thick and solid, `MemberOf` edges thin and dashed. Click any
+node for its Terraform attributes and the reason it failed.
 
-- `helios inspect <tf-json> --scenario <yaml>` emits `{scenario, graph: {nodes, edges}, chain}` as a single JSON document on stdout -- the input the GitHub Action uploads as an artifact and the web viewer renders.
-- **GitHub Action** at [`action/`](./action) is a composite action that runs over every scenario in `fixtures/scenarios/*.yaml`, optionally re-runs `helios verify` if a matching `fixes/<scenario>.json` is committed, uploads each `inspect` JSON as a workflow artifact, and posts a single sticky PR comment summarising the verdict (one collapsible `<details>` per scenario). Caches the prebuilt `helios` binary keyed on `Cargo.lock` + crate sources, so the second run on a PR is fast.
+## Architecture
 
-  Wire it into a workflow:
+- **Rust + Z3 engine** — correctness is non-negotiable, so verdicts come from an SMT solver. Reads
+  `terraform show -json` into a `petgraph::DiGraph`, encodes the scenario as constraints, and solves.
+- **Python + Claude shell** — narration, fix proposals, natural-language scenario parsing.
+  **The shell never decides what is safe.** It makes rigorous results readable.
 
-  ```yaml
-  on: pull_request
-  permissions:
-    contents: read
-    pull-requests: write
-  jobs:
-    helios:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-        - uses: veerarakesh56/helios/action@v0.1.0
-          with:
-            github-token: ${{ secrets.GITHUB_TOKEN }}
-  ```
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) is the deep dive;
+[`docs/ai-boundary.md`](./docs/ai-boundary.md) explains why the AI shell never produces a verdict.
 
-- **Web viewer** at [`web/`](./web) is a Vite + React + cytoscape.js single-page app. `npm run dev` for local dev; `npm run build` for a static bundle. Drag a `helios inspect` JSON into the file picker (or paste it into the textarea) -- failed resources render red, `Contains` edges thick + solid, `MemberOf` edges thin + dashed, click any node to see its Terraform attrs and failure reason.
+## Tests
 
-## Contributing
+**74 tests, all green in CI:**
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md). The easiest first PRs add new AWS resource types or new scenario kinds.
+| | |
+|---|---|
+| Rust | **56** across the graph, engine, SMT encoding, verify loop and CLI |
+| Python | **18** in `helios-ai/`, including syrupy snapshots of the model output |
+
+CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite on every push.
+
+## Limits, stated plainly
+
+- **AWS only**, and only the 8 resource kinds above. A resource Helios does not model is absent from
+  the graph — it is not assumed healthy, it simply is not there.
+- **It reads `terraform show -json`, not live AWS.** `crates/helios-aws` is a stub: live-state
+  collection for drift detection is designed but **not implemented**, and its SDK dependencies are
+  commented out. Nothing in Helios talks to an AWS account.
+- **Availability models are approximations.** Multi-AZ RDS is modelled as surviving one AZ; a real
+  failover takes time, and `slow-rds-failover` exists precisely because that assumption is the
+  interesting one to break.
+- **Five scenario kinds** is not the space of real outages. It covers ones that recur.
+- **The AI shell needs an API key** for real narration. The engine does not — simulation and
+  verification run entirely offline, and `HELIOS_AI_MOCK=1` exercises the whole pipeline with no
+  network at all.
+
+## Related
+
+**[WARDEN](https://github.com/veerarakesh56/warden)** — the same principle applied to live incident
+response: the model proposes, a deterministic verifier decides, nothing executes against
+infrastructure.
+
+## How it was built
+
+Six weekends, in order: cargo workspace and the graph builder · the Z3 engine and the first two
+scenarios · the Claude explain layer with prompt caching · engine-verified fix generation · the
+GitHub Action and the web viewer · docs and the v0.1.0 release.
 
 ## License
 
