@@ -1,5 +1,9 @@
 # Helios
 
+[![CI](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml/badge.svg)](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 > Deterministic failure simulation for cloud infrastructure.
 > Proves exactly which services break under a declared failure — *before* `terraform apply`.
 
