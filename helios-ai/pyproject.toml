@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Claude-powered explanation shell for the Helios deterministic infrastructure simulator."
 readme = "README.md"
 authors = [
-    { name = "Veera Rakesh Kethari", email = "echozenith32@gmail.com" }
+    { name = "Veera Rakesh Kethari" }
 ]
 requires-python = ">=3.12"
 dependencies = [
