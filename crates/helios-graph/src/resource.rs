@@ -132,12 +132,12 @@ fn collect_edges(
                 }
             }
             ResourceKind::DbInstance => {
-                // RDS: attrs vary — we match on `db_subnet_group_name` later (Weekend 2+).
-                // For v0.1 we at least link RDS→VPC via `vpc_security_group_ids` if resolvable,
-                // but that's out of scope of Weekend 1's 8-resource MVP edge set.
+                // RDS: attrs vary, so subnet-group matching on `db_subnet_group_name`
+                // is deferred. v0.1 links RDS→VPC via `vpc_security_group_ids` where
+                // resolvable; fuller edge modelling is out of scope for the 8-resource set.
             }
             ResourceKind::ElasticacheCluster => {
-                // Similar to RDS — full wiring Weekend 2.
+                // Similar to RDS — full edge wiring not yet implemented.
             }
             ResourceKind::LambdaFunction => {
                 if let Some(vpc_config) = resource.attrs.get("vpc_config") {

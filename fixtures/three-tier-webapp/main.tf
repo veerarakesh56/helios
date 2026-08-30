@@ -1,4 +1,4 @@
-# Three-tier web app: the canonical fixture for helios Weekend 1 tests.
+# Three-tier web app: the canonical fixture for the Helios test suite.
 # Intentionally small. Exercises all 8 resource types helios-graph v0.1 parses.
 
 terraform {

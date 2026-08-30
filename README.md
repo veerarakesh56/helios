@@ -184,11 +184,9 @@ CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite o
 response: the model proposes, a deterministic verifier decides, nothing executes against
 infrastructure.
 
-## How it was built
+## Changelog
 
-Six weekends, in order: cargo workspace and the graph builder · the Z3 engine and the first two
-scenarios · the Claude explain layer with prompt caching · engine-verified fix generation · the
-GitHub Action and the web viewer · docs and the v0.1.0 release.
+Release history is in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## License
 

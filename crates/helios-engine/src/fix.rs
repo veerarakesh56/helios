@@ -1,4 +1,4 @@
-//! Fix proposals (Weekend 4). Claude produces these via structured outputs;
+//! Fix proposals. Claude produces these via structured outputs;
 //! the engine's [`apply_fix`] applies them to a graph clone and
 //! [`crate::verify()`] re-runs simulate to confirm they resolve the chain.
 //!

@@ -1,5 +1,5 @@
 //! `verify` re-runs [`crate::simulate()`] against a fix-patched graph and diffs
-//! the failure chains. Used by `helios verify` (Weekend 4 CLI).
+//! the failure chains. Used by the `helios verify` CLI command.
 
 use std::collections::BTreeSet;
 

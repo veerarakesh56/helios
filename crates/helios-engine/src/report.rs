@@ -1,4 +1,4 @@
-//! What the engine returns to the CLI (and, in Weekend 3, the AI shell).
+//! What the engine returns to the CLI and to the AI shell.
 
 use serde::{Deserialize, Serialize};
 

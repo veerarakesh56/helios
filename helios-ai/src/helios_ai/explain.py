@@ -29,7 +29,7 @@ proof into a short, concrete report an SRE can act on.
 Rules:
 - Never contradict the FailureChain. The engine is authoritative.
 - Never invent resources or failures not in the FailureChain.
-- Do NOT propose fixes yet (that is Weekend 4's job). Describe only.
+- Do NOT propose fixes here; that is the propose-fix step. Describe only.
 - Use the glossary to explain why each resource failed, tracing through
   Contains edges when relevant.
 - Lead with the scenario, then the blast radius (# of failures), then

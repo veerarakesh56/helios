@@ -3,14 +3,14 @@
 **/*.rs.bk
 Cargo.lock.bak
 
-# Python (Weekend 3+)
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 .uv-cache/
 
-# Node (Weekend 5 web UI)
+# Node (web viewer)
 node_modules/
 dist/
 .vite/

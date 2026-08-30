@@ -13,7 +13,7 @@ viewer.
 
 ### Added
 
-#### Engine and graph (Weekends 1-2)
+#### Engine and graph
 - Cargo workspace with five crates: `helios-cli`, `helios-graph`,
   `helios-models`, `helios-engine`, `helios-aws` (stub).
 - `helios-graph` parses `terraform show -json` for eight AWS resource kinds:
@@ -29,7 +29,7 @@ viewer.
 - Pre-compiled Z3 4.16.0 via the `z3 0.20` `gh-release` feature; no
   system Z3 install needed on Linux or Windows.
 
-#### AI shell and structured fixes (Weekends 3-4)
+#### AI shell and structured fixes
 - `helios-ai/` uv-managed Python 3.12 package. Pydantic models mirror the
   Rust `FailureChain`, `FailedResource`, `FixProposal`, `FixEdit` byte
   for byte (`extra="forbid"` keeps schema drift loud).
@@ -48,7 +48,7 @@ viewer.
   if any failure remains.
 - Structured `set_attr` edit op (only edit op in v0.1).
 
-#### Action, viewer, and combined inspect (Weekend 5)
+#### Action, viewer, and combined inspect
 - `helios inspect <tf-json> --scenario <yaml>` emits a single JSON
   document `{scenario, graph: {nodes, edges}, chain}`. Hand-rolled flat
   graph shape (not petgraph's native serde, whose `NodeIndex` integers
@@ -66,7 +66,7 @@ viewer.
   `helios-ai/src/helios_ai/models.py`, TypeScript mirror in
   `web/src/types.ts`.
 
-#### Docs, release scaffolding, and demo (Weekend 6)
+#### Docs, release scaffolding, and demo
 - `docs/ai-boundary.md` -- canonical "AI never produces a safety verdict"
   essay with the differential-testing rationale and a Cedar prior-art
   reference.

@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Z3-powered simulation core (Weekend 2)."
+description = "Z3-powered simulation core."
 
 [dependencies]
 helios-graph.workspace = true

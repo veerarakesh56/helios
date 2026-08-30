@@ -1,4 +1,4 @@
-//! Scenario = a declarative failure to simulate. Weekend 2 supports two kinds.
+//! Scenario = a declarative failure to simulate. Five kinds are supported.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

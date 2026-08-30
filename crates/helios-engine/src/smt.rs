@@ -1,4 +1,4 @@
-//! Z3 encoder (Weekend 2). Region-outage + az-outage scenarios only.
+//! Z3 encoder. Covers all five scenario kinds.
 
 use std::collections::HashMap;
 
