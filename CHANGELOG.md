@@ -4,6 +4,25 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-09-06
+
+### Fixed
+
+- ⛔ **A scenario naming a resource that is not in the graph was a SILENT PASS.** `apply_scenario` did
+  `if let Some(idx) = …find(…)` with no `else`, so a typo in `db_id` or `subnet_id` — or naming one of
+  the resource kinds Helios skips, such as `aws_nat_gateway` — asserted nothing. The run then printed
+  *"No failures — configuration is resilient"* and exited **0**. A typo read as a clean bill of health.
+  The *fix* path already errored on an unknown resource id, so the asymmetry ran the wrong way: the
+  safety-critical direction was the forgiving one. `apply_scenario` now returns the target it could
+  not find (`#[must_use]`), and `simulate` turns that into `SimulateError::UnknownTarget`, naming the
+  id and suggesting the likely cause.
+
+### Testing
+
+- **85 tests** (65 Rust, 20 Python). The new test asserts an unknown target is reported rather than
+  ignored; the eleven existing call sites now assert the target *was* found, which is stricter than
+  discarding the result. The five shipped scenarios are unchanged at 3 / 9 / 2 / 1 / 1.
+
 ## [0.1.3] - 2026-09-06
 
 ### Fixed

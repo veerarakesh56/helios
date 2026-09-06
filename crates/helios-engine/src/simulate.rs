@@ -14,6 +14,12 @@ pub enum SimulateError {
     Unsat,
     #[error("solver returned unknown — Z3 timed out or hit a resource limit")]
     Unknown,
+    /// The scenario named a resource the graph does not contain. Silently ignoring this used to
+    /// report "no failures", i.e. a typo read as a clean bill of health.
+    #[error(
+        "scenario names '{0}', which is not in the graph — check the id, or it may be a resource kind Helios does not model (those are skipped with a warning)"
+    )]
+    UnknownTarget(String),
 }
 
 /// Run one scenario against one graph. Returns the failure chain.
@@ -22,7 +28,9 @@ pub fn simulate(graph: &ResourceGraph, scenario: &Scenario) -> Result<FailureCha
     let mut enc = Encoder::new();
     enc.encode_availability(graph, &solver);
     enc.encode_dependencies(graph, &solver);
-    enc.apply_scenario(scenario, graph, &solver);
+    if let Some(missing) = enc.apply_scenario(scenario, graph, &solver) {
+        return Err(SimulateError::UnknownTarget(missing));
+    }
 
     match solver.check() {
         SatResult::Sat => Ok(enc.extract_failures(graph, scenario, &solver)),

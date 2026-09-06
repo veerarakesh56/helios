@@ -9,9 +9,9 @@
 
 ![demo](docs/demo.gif)
 
-**Status:** v0.1.3 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
-that runs every scenario on a pull request and posts the verdict, and a web viewer. **84 tests
-(64 Rust, 20 Python), plus 6 for the viewer; CI green.**
+**Status:** v0.1.4 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
+that runs every scenario on a pull request and posts the verdict, and a web viewer. **85 tests
+(65 Rust, 20 Python), plus 6 for the viewer; CI green.**
 
 > The Action **reports**; it does not block. `action/scripts/run-scenarios.sh` captures `helios verify`'s
 > exit code inside `set +e` (its own comment: *"capture but don't abort"*) and `helios inspect` returns
@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: veerarakesh56/helios/action@v0.1.3
+      - uses: veerarakesh56/helios/action@v0.1.4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -164,11 +164,11 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**84 tests, all green in CI (plus 6 for the web viewer):**
+**85 tests, all green in CI (plus 6 for the web viewer):**
 
 | | |
 |---|---|
-| Rust | **64** across the graph, engine, SMT encoding, verify loop and CLI |
+| Rust | **65** across the graph, engine, SMT encoding, verify loop and CLI |
 | Python | **20** in `helios-ai/`, including syrupy snapshots of the model output |
 
 CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite on every push.

@@ -222,12 +222,21 @@ impl Encoder {
     ///
     /// Needs `graph` so targeted-resource kinds (slow-rds-failover,
     /// single-nat-death, iam-revocation) can look up the affected nodes.
+    /// Assert the scenario. Returns the target id the scenario named but the graph does not
+    /// contain, if any.
+    ///
+    /// A miss used to be silent: nothing was asserted, nothing was down, and the run printed
+    /// "No failures — configuration is resilient" and exited 0. So a typo in `db_id`, or naming one
+    /// of the skipped resource kinds, read as a clean bill of health. The fix path already errors on
+    /// an unknown id, so the asymmetry ran the wrong way — the safety-critical direction was the
+    /// forgiving one. The caller turns this into an error.
+    #[must_use]
     pub fn apply_scenario(
         &mut self,
         scenario: &crate::Scenario,
         graph: &ResourceGraph,
         solver: &Solver,
-    ) {
+    ) -> Option<String> {
         match &scenario.kind {
             crate::ScenarioKind::AzOutage { az } => {
                 let v = self.az_var(az);
@@ -257,9 +266,15 @@ impl Encoder {
                 // Force that specific resource down through its `forced` variable — NOT through
                 // its availability rule — so its AZ stays up and only Contains-dependents follow.
                 let mut named = Vec::new();
-                if let Some(idx) = graph.node_indices().find(|i| &graph[*i].id == db_id) {
-                    solver.assert(&self.forced_down[&idx]);
-                    named.push(idx);
+                match graph.node_indices().find(|i| &graph[*i].id == db_id) {
+                    Some(idx) => {
+                        solver.assert(&self.forced_down[&idx]);
+                        named.push(idx);
+                    }
+                    None => {
+                        self.pin_everything_else(solver, &[], &[], &named);
+                        return Some(db_id.clone());
+                    }
                 }
                 self.pin_everything_else(solver, &[], &[], &named);
             }
@@ -276,6 +291,7 @@ impl Encoder {
                 self.pin_everything_else(solver, &[], &[], &named);
             }
         }
+        None
     }
 
     /// After `solver.check() == Sat`, build the failure chain from the model.
@@ -511,7 +527,10 @@ mod encode_tests {
                 az: "us-east-1a".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -542,7 +561,10 @@ mod encode_tests {
                 db_id: "aws_db_instance.primary".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -570,7 +592,10 @@ mod encode_tests {
                 subnet_id: "aws_subnet.public_a".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -610,7 +635,10 @@ mod encode_tests {
                 principal_arn: role_arn.into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -618,6 +646,35 @@ mod encode_tests {
         assert!(
             ids.contains(&"aws_instance.web"),
             "web should fail after its role is revoked; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_scenario_naming_a_resource_that_does_not_exist_is_not_a_silent_pass() {
+        // This used to assert nothing and report "No failures — configuration is resilient", exit 0.
+        // So a typo in `db_id`, or naming a resource kind Helios skips, read as a clean bill of
+        // health. The fix path already errored on an unknown id; the scenario path did not, and that
+        // asymmetry ran the wrong way.
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let missing = enc.apply_scenario(
+            &Scenario {
+                name: "typo".into(),
+                kind: ScenarioKind::SlowRdsFailover {
+                    db_id: "aws_db_instance.does_not_exist".into(),
+                },
+            },
+            &graph,
+            &solver,
+        );
+        assert_eq!(
+            missing.as_deref(),
+            Some("aws_db_instance.does_not_exist"),
+            "an unknown scenario target must be reported, not silently ignored"
         );
     }
 
@@ -658,7 +715,10 @@ mod encode_tests {
                 region: "eu-west-2".into(),
             },
         };
-        enc.apply_scenario(&eu, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&eu, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
         assert_eq!(solver.check(), SatResult::Sat);
         let ids: Vec<String> = enc
             .extract_failures(&graph, &eu, &solver)
@@ -683,7 +743,10 @@ mod encode_tests {
                 region: "us-east-1".into(),
             },
         };
-        enc2.apply_scenario(&us, &graph, &solver2);
+        assert!(
+            enc2.apply_scenario(&us, &graph, &solver2).is_none(),
+            "scenario target must exist"
+        );
         assert_eq!(solver2.check(), SatResult::Sat);
         let untouched = enc2.extract_failures(&graph, &us, &solver2).failures;
         assert!(
@@ -723,7 +786,10 @@ mod encode_tests {
                 az: "us-east-1a".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
@@ -773,15 +839,19 @@ mod encode_tests {
         let mut enc = Encoder::new();
         enc.encode_availability(&graph, &solver);
         enc.encode_dependencies(&graph, &solver);
-        enc.apply_scenario(
-            &Scenario {
-                name: "lose-1a".into(),
-                kind: ScenarioKind::AzOutage {
-                    az: "us-east-1a".into(),
+        assert!(
+            enc.apply_scenario(
+                &Scenario {
+                    name: "lose-1a".into(),
+                    kind: ScenarioKind::AzOutage {
+                        az: "us-east-1a".into(),
+                    },
                 },
-            },
-            &graph,
-            &solver,
+                &graph,
+                &solver,
+            )
+            .is_none(),
+            "scenario target must exist"
         );
         assert_eq!(solver.check(), SatResult::Sat);
         let model = solver.get_model().unwrap();
@@ -811,7 +881,10 @@ mod encode_tests {
                 subnet_id: "aws_subnet.public_a".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
         let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
@@ -837,7 +910,10 @@ mod encode_tests {
                 db_id: "aws_db_instance.primary".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
         let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
@@ -859,7 +935,10 @@ mod encode_tests {
                 principal_arn: "arn:aws:iam::123456789012:role/lambda-worker".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
         let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
@@ -881,7 +960,10 @@ mod encode_tests {
                 region: "us-east-1".into(),
             },
         };
-        enc.apply_scenario(&scenario, &graph, &solver);
+        assert!(
+            enc.apply_scenario(&scenario, &graph, &solver).is_none(),
+            "scenario target must exist"
+        );
 
         assert_eq!(solver.check(), SatResult::Sat);
         let chain = enc.extract_failures(&graph, &scenario, &solver);
