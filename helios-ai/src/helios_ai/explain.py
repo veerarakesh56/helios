@@ -12,13 +12,20 @@ on the second call.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .glossary import AVAILABILITY_MODEL_GLOSSARY
 from .models import FailureChain
 
-MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "claude-opus-4-7"
 MAX_TOKENS = 16000
+
+
+def model_id() -> str:
+    """The Claude model to call. Model ids expire; `HELIOS_AI_MODEL` overrides the default
+    without a code change. Read at call time so a test or a shell can set it late."""
+    return os.environ.get("HELIOS_AI_MODEL", DEFAULT_MODEL)
 
 SYSTEM_PERSONA = """\
 You are the narration layer of Helios, a deterministic infrastructure
@@ -45,7 +52,7 @@ def explain(chain: FailureChain, *, client: Any) -> str:
     instance. Passing it in lets tests inject a fake client.
     """
     response = client.messages.create(
-        model=MODEL,
+        model=model_id(),
         max_tokens=MAX_TOKENS,
         system=[
             {

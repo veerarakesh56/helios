@@ -13,7 +13,9 @@
             "id": "vpc-0aaa111",
             "cidr_block": "10.0.0.0/16",
             "arn": "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0aaa111",
-            "tags": { "Name": "three-tier-webapp" }
+            "tags": {
+              "Name": "three-tier-webapp"
+            }
           }
         },
         {
@@ -63,8 +65,14 @@
             "arn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/three-tier-alb/abc123",
             "name": "three-tier-alb",
             "load_balancer_type": "application",
-            "subnets": ["subnet-0a1a", "subnet-0b1b"],
-            "availability_zones": ["us-east-1a", "us-east-1b"]
+            "subnets": [
+              "subnet-0a1a",
+              "subnet-0b1b"
+            ],
+            "availability_zones": [
+              "us-east-1a",
+              "us-east-1b"
+            ]
           }
         },
         {
@@ -108,9 +116,13 @@
             "runtime": "python3.12",
             "handler": "index.handler",
             "vpc_config": {
-              "subnet_ids": ["subnet-0a1a", "subnet-0b1b"],
+              "subnet_ids": [
+                "subnet-0a1a",
+                "subnet-0b1b"
+              ],
               "security_group_ids": []
-            }
+            },
+            "role": "arn:aws:iam::123456789012:role/lambda-worker"
           }
         },
         {

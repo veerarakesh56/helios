@@ -36,12 +36,14 @@ Takes an entire region offline. Only `GlobalEdge` resources survive.
 ```yaml
 kind:
   type: iam-revocation
-  principal_arn: arn:aws:iam::123456789012:role/web
+  principal_arn: arn:aws:iam::123456789012:role/lambda-worker
 ```
 
-Fails any resource whose `attrs.iam_role_arn` or `attrs.role_arn` matches the
-principal. v0.1 is a string match over the Terraform-JSON attr set; v0.2
-models IAM as graph nodes so multi-hop policy chains propagate.
+Fails any resource whose `attrs.iam_role_arn`, `attrs.role_arn` or `attrs.role`
+(the attribute `aws_lambda_function` actually uses) matches the principal, plus
+everything those resources contain. v0.1 is a string match over the
+Terraform-JSON attr set; modelling IAM as graph nodes so multi-hop policy chains
+propagate is future work.
 
 ### `slow-rds-failover`
 
@@ -51,9 +53,11 @@ kind:
   db_id: aws_db_instance.primary
 ```
 
-Models a multi-AZ RDS whose failover window exceeds its SLO: during the
-window the DB is unreachable and dependents inherit the failure via
-`Contains` edges.
+Models a multi-AZ RDS whose failover takes longer than expected: during the
+window the DB is treated as unavailable and dependents inherit the failure via
+`Contains` edges. The DB is forced down *directly* — its availability zones stay
+up, so nothing else in those zones is affected. (Before 0.1.1 the DB was forced
+down through its availability rule, which made the solver take both zones down.)
 
 ### `single-nat-death`
 
@@ -63,8 +67,9 @@ kind:
   subnet_id: aws_subnet.public_a
 ```
 
-Treats the subnet as having lost egress. Every resource inside it fails;
-NAT itself is not yet a graph node (v0.2 work).
+Treats the subnet as having lost egress. Every resource inside it (`Contains`
+edges) fails; the subnet's availability zone itself stays up, so unrelated
+resources in the same zone survive. NAT itself is not yet a graph node.
 
 Add a new scenario by creating a YAML file in `fixtures/scenarios/` and running:
 

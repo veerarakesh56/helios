@@ -47,7 +47,50 @@ pub enum DepDoc {
     MemberOf(String),
 }
 
-/// Build an [`InspectDoc`] from a graph and a freshly-simulated chain.
+/// Attribute names whose values must never leave the machine in an inspect document. The
+/// document is uploaded as a CI artifact and pasted into a viewer, and a real
+/// `terraform show -json` carries plaintext passwords and keys under names like these.
+const SENSITIVE_ATTR_FRAGMENTS: [&str; 8] = [
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "private_key",
+    "access_key",
+    "credential",
+    "api_key",
+];
+
+/// Placeholder written in place of a sensitive value.
+pub const REDACTED: &str = "<redacted>";
+
+/// Recursively replace the value of any attribute whose name contains a sensitive fragment.
+/// Keys are kept so a reader can see the field existed; only the value is replaced.
+pub fn scrub_sensitive_attrs(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(k, v)| {
+                    let lower = k.to_ascii_lowercase();
+                    let hit = SENSITIVE_ATTR_FRAGMENTS.iter().any(|f| lower.contains(f));
+                    let scrubbed = if hit && !v.is_null() {
+                        serde_json::Value::String(REDACTED.to_string())
+                    } else {
+                        scrub_sensitive_attrs(v)
+                    };
+                    (k.clone(), scrubbed)
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(scrub_sensitive_attrs).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Build an [`InspectDoc`] from a graph and a freshly-simulated chain. Every node's attrs are
+/// passed through [`scrub_sensitive_attrs`] first.
 pub fn build_inspect(graph: &ResourceGraph, chain: FailureChain) -> InspectDoc {
     let scenario = chain.scenario.clone();
 
@@ -58,7 +101,7 @@ pub fn build_inspect(graph: &ResourceGraph, chain: FailureChain) -> InspectDoc {
             NodeDoc {
                 id: r.id.clone(),
                 kind: format!("{:?}", r.kind),
-                attrs: r.attrs.clone(),
+                attrs: scrub_sensitive_attrs(&r.attrs),
             }
         })
         .collect();
@@ -140,6 +183,24 @@ mod tests {
             .iter()
             .any(|e| matches!(&e.dep, DepDoc::Contains(via) if via == "vpc_id"));
         assert!(has_contains, "expected at least one Contains(vpc_id) edge");
+    }
+
+    #[test]
+    fn inspect_redacts_sensitive_attrs_and_keeps_the_rest() {
+        let attrs = serde_json::json!({
+            "identifier": "three-tier-db",
+            "password": "changeme-in-real-life",
+            "master_user_secret": {"kms_key_id": "abc"},
+            "vpc_config": {"api_key": "k", "subnet_ids": ["subnet-0a1a"]},
+            "tags": {"Name": "db"}
+        });
+        let out = scrub_sensitive_attrs(&attrs);
+        assert_eq!(out["identifier"], "three-tier-db");
+        assert_eq!(out["password"], REDACTED);
+        assert_eq!(out["master_user_secret"], REDACTED);
+        assert_eq!(out["vpc_config"]["api_key"], REDACTED);
+        assert_eq!(out["vpc_config"]["subnet_ids"][0], "subnet-0a1a");
+        assert_eq!(out["tags"]["Name"], "db");
     }
 
     #[test]

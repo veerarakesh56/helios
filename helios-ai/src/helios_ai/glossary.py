@@ -60,12 +60,14 @@ kinds: aws_s3_bucket (global namespace), CloudFront (future).
 - **region-outage** { region }: an entire region offline. Only GlobalEdge
   resources survive.
 - **iam-revocation** { principal_arn }: a role/principal is revoked.
-  v0.1 is a string match on `attrs.iam_role_arn` or `attrs.role_arn`; any
-  resource naming that principal fails (dependents cascade via Contains).
-- **slow-rds-failover** { db_id }: a multi-AZ RDS's failover exceeds its
-  SLO window. The target DB is treated as unavailable; dependents fail.
+  v0.1 is a string match on `attrs.iam_role_arn`, `attrs.role_arn` or
+  `attrs.role`; any resource naming that principal fails (dependents cascade
+  via Contains). Its availability zone stays up.
+- **slow-rds-failover** { db_id }: a multi-AZ RDS's failover takes longer
+  than expected. The target DB alone is treated as unavailable; dependents
+  fail via Contains edges; its zones stay up.
 - **single-nat-death** { subnet_id }: the subnet's NAT gateway dies.
-  Subnet loses egress; every instance inside it fails.
+  Subnet loses egress; every resource inside it fails; the zone stays up.
 
 When proposing fixes, propose the minimal set of `set_attr` edits that
 resolve the failure chain while preserving AWS semantics (e.g. enabling

@@ -28,6 +28,12 @@ def test_explain_sends_cache_markers(fake_client) -> None:
     assert call["model"] == "claude-opus-4-7"
 
 
+def test_explain_model_id_comes_from_env(fake_client, monkeypatch) -> None:
+    monkeypatch.setenv("HELIOS_AI_MODEL", "claude-test-override")
+    explain(FailureChain(scenario="dummy", failures=[]), client=fake_client)
+    assert fake_client.messages.calls[0]["model"] == "claude-test-override"
+
+
 def test_explain_passes_failure_chain_json_on_user_turn(fake_client) -> None:
     chain = FailureChain(scenario="test-xyz", failures=[])
     explain(chain, client=fake_client)

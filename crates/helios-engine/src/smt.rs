@@ -1,4 +1,11 @@
 //! Z3 encoder. Covers all five scenario kinds.
+//!
+//! Every resource's `down` Boolean is *defined* — `down ⇔ availability-condition ∨ forced ∨
+//! (any Contains-parent down)` — and a scenario then pins every AZ, region and `forced`
+//! variable it does not name to `false`. The model is therefore unique for a scenario, not a
+//! solver default. (v0.1.0 forced a targeted resource down *through* its availability rule, so
+//! Z3 satisfied "the subnet is down" by taking its whole AZ down — and nothing pinned the zones
+//! a scenario never mentioned. Found by reading the fixture output, fixed in 0.1.1.)
 
 use std::collections::HashMap;
 
@@ -45,6 +52,9 @@ pub struct Encoder {
     pub(crate) az_down: HashMap<String, Bool>,
     /// `Bool` per region, true ⇔ that region is down.
     pub(crate) region_down: HashMap<String, Bool>,
+    /// `Bool` per resource, true ⇔ a scenario forces this resource down directly (slow RDS
+    /// failover, NAT death, IAM revocation) — independently of its AZ or region.
+    pub(crate) forced_down: HashMap<NodeIndex, Bool>,
 }
 
 impl Default for Encoder {
@@ -59,6 +69,7 @@ impl Encoder {
             resource_down: HashMap::new(),
             az_down: HashMap::new(),
             region_down: HashMap::new(),
+            forced_down: HashMap::new(),
         }
     }
 
@@ -76,13 +87,26 @@ impl Encoder {
             .clone()
     }
 
-    /// For every node in the graph, declare its `resource_down` Bool and assert the
-    /// biconditional that relates it to az_down / region_down.
+    /// For every node in the graph, declare its `resource_down` and `forced_down` Bools and
+    /// assert the definition `down ⇔ availability-condition ∨ forced ∨ (any Contains-parent down)`.
+    ///
+    /// The parent term is part of the *definition*, not a separate implication: with a plain
+    /// `parent ⇒ child` on top of a biconditional, forcing a child down could only be satisfied
+    /// by making the child's own AZ or region down — which is exactly the v0.1.0 defect.
     pub fn encode_availability(&mut self, graph: &ResourceGraph, solver: &Solver) {
+        // Pass 1: declare every resource's variables so parent terms can be referenced.
+        for idx in graph.node_indices() {
+            let r: &Resource = &graph[idx];
+            self.resource_down
+                .insert(idx, Bool::new_const(format!("down_{}", r.id)));
+            self.forced_down
+                .insert(idx, Bool::new_const(format!("forced_{}", r.id)));
+        }
+        // Pass 2: assert the definition.
         for idx in graph.node_indices() {
             let r: &Resource = &graph[idx];
             let model = availability_for(tf_type_of(&r.kind), &r.attrs, DEFAULT_REGION);
-            let down = Bool::new_const(format!("down_{}", r.id));
+            let down = self.resource_down[&idx].clone();
             let cond: Bool = match model {
                 AvailabilityModel::SingleAz { az } => {
                     let region = region_of_az(&az);
@@ -103,8 +127,40 @@ impl Encoder {
                 AvailabilityModel::Regional { region } => self.region_var(&region),
                 AvailabilityModel::GlobalEdge => Bool::from_bool(false),
             };
-            solver.assert(down.eq(cond));
-            self.resource_down.insert(idx, down);
+            let mut terms: Vec<Bool> = vec![cond, self.forced_down[&idx].clone()];
+            for edge in graph.edges_directed(idx, petgraph::Direction::Outgoing) {
+                if matches!(edge.weight(), Dependency::Contains(_)) {
+                    terms.push(self.resource_down[&edge.target()].clone());
+                }
+            }
+            solver.assert(down.eq(Bool::or(&terms)));
+        }
+    }
+
+    /// Pin every AZ, region and `forced` variable NOT listed to `false`, so the only things
+    /// down are the ones the scenario names and what follows from them. Without this the
+    /// unnamed variables are free and the result depends on the solver's default assignment.
+    fn pin_everything_else(
+        &self,
+        solver: &Solver,
+        azs_named: &[String],
+        regions_named: &[String],
+        forced_named: &[NodeIndex],
+    ) {
+        for (az, v) in &self.az_down {
+            if !azs_named.contains(az) {
+                solver.assert(v.not());
+            }
+        }
+        for (region, v) in &self.region_down {
+            if !regions_named.contains(region) {
+                solver.assert(v.not());
+            }
+        }
+        for (idx, v) in &self.forced_down {
+            if !forced_named.contains(idx) {
+                solver.assert(v.not());
+            }
         }
     }
 
@@ -147,35 +203,48 @@ impl Encoder {
             crate::ScenarioKind::AzOutage { az } => {
                 let v = self.az_var(az);
                 solver.assert(&v);
-                // Pin the region UP so we observe the AZ effect in isolation.
-                let region = region_of_az(az);
-                solver.assert(self.region_var(&region).not());
+                // Pin the region UP so we observe the AZ effect in isolation — and every
+                // OTHER zone up too, so the other zones' survival is asserted, not defaulted.
+                self.pin_everything_else(solver, std::slice::from_ref(az), &[], &[]);
             }
             crate::ScenarioKind::RegionOutage { region } => {
                 let v = self.region_var(region);
                 solver.assert(&v);
+                // A region outage takes its zones with it (semantically, and so the model reads
+                // consistently); every other region and zone stays up.
+                let azs_in_region: Vec<String> = self
+                    .az_down
+                    .keys()
+                    .filter(|az| &region_of_az(az) == region)
+                    .cloned()
+                    .collect();
+                for az in &azs_in_region {
+                    solver.assert(&self.az_down[az]);
+                }
+                self.pin_everything_else(solver, &azs_in_region, std::slice::from_ref(region), &[]);
             }
             crate::ScenarioKind::SlowRdsFailover { db_id }
             | crate::ScenarioKind::SingleNatDeath { subnet_id: db_id } => {
-                // Force that specific resource down; dependents propagate.
+                // Force that specific resource down through its `forced` variable — NOT through
+                // its availability rule — so its AZ stays up and only Contains-dependents follow.
+                let mut named = Vec::new();
                 if let Some(idx) = graph.node_indices().find(|i| &graph[*i].id == db_id) {
-                    if let Some(down) = self.resource_down.get(&idx) {
-                        solver.assert(down);
-                    }
+                    solver.assert(&self.forced_down[&idx]);
+                    named.push(idx);
                 }
+                self.pin_everything_else(solver, &[], &[], &named);
             }
             crate::ScenarioKind::IamRevocation { principal_arn } => {
-                // v0.1: string-match iam_role_arn / role_arn on resource attrs.
-                for (idx, down) in &self.resource_down {
-                    let r: &Resource = &graph[*idx];
-                    let hit = r.attrs.get("iam_role_arn").and_then(|v| v.as_str())
-                        == Some(principal_arn.as_str())
-                        || r.attrs.get("role_arn").and_then(|v| v.as_str())
-                            == Some(principal_arn.as_str());
-                    if hit {
-                        solver.assert(down);
+                // String match on the attributes that carry a principal: `iam_role_arn`,
+                // `role_arn`, and `role` (the attribute name aws_lambda_function actually uses).
+                let mut named = Vec::new();
+                for idx in graph.node_indices() {
+                    if names_principal(&graph[idx], principal_arn) {
+                        solver.assert(&self.forced_down[&idx]);
+                        named.push(idx);
                     }
                 }
+                self.pin_everything_else(solver, &[], &[], &named);
             }
         }
     }
@@ -248,11 +317,25 @@ fn reason_for(r: &Resource, scenario: &crate::Scenario) -> String {
         (_, crate::ScenarioKind::SingleNatDeath { subnet_id }) if subnet_id == &r.id => {
             format!("NAT in subnet {subnet_id} is dead — subnet loses egress")
         }
-        (_, crate::ScenarioKind::IamRevocation { principal_arn }) => {
+        (_, crate::ScenarioKind::IamRevocation { principal_arn })
+            if names_principal(r, principal_arn) =>
+        {
             format!("principal {principal_arn} was revoked")
         }
         _ => "failure propagated from a dependency".to_string(),
     }
+}
+
+/// The attribute names under which a Terraform resource carries an IAM principal ARN.
+/// `role` is what `aws_lambda_function` uses; the other two cover ECS tasks, EC2 instance
+/// profiles and similar. v0.1 is a string match; modelling IAM as graph nodes is future work.
+const PRINCIPAL_ATTRS: [&str; 3] = ["iam_role_arn", "role_arn", "role"];
+
+/// Does this resource name `principal_arn` in any of the principal-carrying attributes?
+pub(crate) fn names_principal(r: &Resource, principal_arn: &str) -> bool {
+    PRINCIPAL_ATTRS
+        .iter()
+        .any(|key| r.attrs.get(key).and_then(|v| v.as_str()) == Some(principal_arn))
 }
 
 /// Map our `ResourceKind` back to the Terraform type string that `availability_for` expects.
@@ -323,6 +406,7 @@ mod encode_tests {
 
         solver.assert(enc.az_var("us-east-1a"));
         solver.assert(enc.region_var("us-east-1").not());
+        enc.pin_everything_else(&solver, &["us-east-1a".into()], &[], &[]);
 
         assert_eq!(solver.check(), SatResult::Sat);
         let model = solver.get_model().unwrap();
@@ -374,6 +458,7 @@ mod encode_tests {
 
         solver.assert(enc.az_var("us-east-1a"));
         solver.assert(enc.region_var("us-east-1").not());
+        enc.pin_everything_else(&solver, &["us-east-1a".into()], &[], &[]);
 
         assert_eq!(solver.check(), SatResult::Sat);
         let model = solver.get_model().unwrap();
@@ -503,6 +588,109 @@ mod encode_tests {
             ids.contains(&"aws_instance.web"),
             "web should fail after its role is revoked; got {ids:?}"
         );
+    }
+
+    #[test]
+    fn az_outage_pins_the_other_zone_up_not_by_default() {
+        // v0.1.0 never constrained az_down_us-east-1b; the other zone's survival was Z3's
+        // default assignment for a free Boolean, not a property of the encoding.
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+        enc.apply_scenario(
+            &Scenario {
+                name: "lose-1a".into(),
+                kind: ScenarioKind::AzOutage {
+                    az: "us-east-1a".into(),
+                },
+            },
+            &graph,
+            &solver,
+        );
+        assert_eq!(solver.check(), SatResult::Sat);
+        let model = solver.get_model().unwrap();
+        let b_down = model
+            .eval(&enc.az_down["us-east-1b"], true)
+            .unwrap()
+            .as_bool()
+            .unwrap();
+        assert!(!b_down, "us-east-1b must be pinned UP by the encoding");
+        // And the solver cannot choose otherwise: asserting it down must be UNSAT.
+        solver.assert(&enc.az_down["us-east-1b"]);
+        assert_eq!(solver.check(), SatResult::Unsat);
+    }
+
+    #[test]
+    fn single_nat_death_does_not_take_the_zone_down() {
+        // v0.1.0 forced the subnet down THROUGH its availability rule, so Z3 took the whole
+        // AZ down and the unrelated cache (no edge to the subnet) fell with it.
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+        let scenario = Scenario {
+            name: "nat-1a-dead".into(),
+            kind: ScenarioKind::SingleNatDeath {
+                subnet_id: "aws_subnet.public_a".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["aws_instance.web", "aws_subnet.public_a"],
+            "only the subnet and what it CONTAINS may fall; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn slow_rds_failover_fails_only_the_database() {
+        // v0.1.0 forced the multi-AZ DB down through `(a ∧ b) ∨ region`, so Z3 took BOTH zones
+        // down and the ALB and both subnets fell — six failures for one slow failover.
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+        let scenario = Scenario {
+            name: "rds-slow".into(),
+            kind: ScenarioKind::SlowRdsFailover {
+                db_id: "aws_db_instance.primary".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["aws_db_instance.primary"], "got {ids:?}");
+    }
+
+    #[test]
+    fn iam_revocation_reads_the_lambda_role_attribute() {
+        // The shipped fixture's Lambda carries its principal under `role`, which v0.1.0 never
+        // read — so the bundled iam-revocation scenario reported "resilient" for the wrong reason.
+        let graph = build_graph();
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+        let scenario = Scenario {
+            name: "revoke-lambda-role".into(),
+            kind: ScenarioKind::IamRevocation {
+                principal_arn: "arn:aws:iam::123456789012:role/lambda-worker".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["aws_lambda_function.worker"], "got {ids:?}");
+        assert!(chain.failures[0].reason.contains("was revoked"));
     }
 
     #[test]

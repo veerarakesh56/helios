@@ -66,6 +66,12 @@ def test_propose_fix_sends_two_cache_breakpoints(fake_client) -> None:
     assert call["model"] == "claude-opus-4-7"
 
 
+def test_propose_fix_model_id_comes_from_env(fake_client, monkeypatch) -> None:
+    monkeypatch.setenv("HELIOS_AI_MODEL", "claude-test-override")
+    propose_fix(_cache_chain(), attrs_snapshot={}, client=fake_client)
+    assert fake_client.messages.calls[0]["model"] == "claude-test-override"
+
+
 def test_propose_fix_sends_chain_and_attrs_on_user_turn(fake_client) -> None:
     chain = _cache_chain()
     propose_fix(

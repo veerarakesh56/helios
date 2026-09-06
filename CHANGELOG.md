@@ -4,6 +4,49 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-06
+
+Correctness release. Every item below was found by running the shipped fixture
+through every shipped scenario and reading the output, not the code.
+
+### Fixed
+
+- **The SMT encoding was under-constrained.** A scenario pinned only the zone
+  or region it named; every other `az_down_*` / `region_down_*` variable was
+  free, so the other zones' survival was Z3's default assignment for a free
+  Boolean rather than a property of the encoding. Every unnamed AZ, region and
+  forced variable is now pinned `false`, and a test asserts the other zone
+  *cannot* be chosen down (`Unsat`).
+- **Forcing a resource down took its whole zone with it.** `slow-rds-failover`
+  and `single-nat-death` forced the target's `down` Boolean, which is *defined*
+  by its availability rule, so the solver satisfied it by taking the AZ (or both
+  AZs of a multi-AZ database) down — six failures for one slow failover, and an
+  unrelated cache failing on a NAT death. Each resource now has a dedicated
+  `forced_*` variable, and `down ⇔ availability ∨ forced ∨ (any Contains-parent
+  down)` is the definition, so only the target and what it contains fail.
+- **`iam-revocation` never matched the shipped fixture.** The matcher read
+  `iam_role_arn` / `role_arn`; `aws_lambda_function` carries its principal under
+  `role`, and the fixture's Terraform JSON did not include the attribute at all,
+  so the bundled scenario reported "resilient" for the wrong reason. The matcher
+  now reads `role` too, the fixture carries the Lambda's role as `main.tf`
+  declares it, and the scenario names it.
+- **`helios inspect` leaked raw attributes.** The document is uploaded as a CI
+  artifact; a real `terraform show -json` carries plaintext passwords and keys.
+  Attribute values whose name contains `password`, `passwd`, `secret`, `token`,
+  `private_key`, `access_key`, `credential` or `api_key` are now replaced with
+  `<redacted>` (keys kept, nested objects included).
+- **The Claude model id was hard-coded** in two files. `HELIOS_AI_MODEL` now
+  overrides the default (`claude-opus-4-7`) without a code change.
+- Workspace and package versions were still `0.0.1` under a `v0.1.0` release;
+  both now carry the release version.
+
+### Changed
+
+- Reason strings: under `iam-revocation`, only the matched resource reads
+  "principal … was revoked"; resources that fail through containment read
+  "failure propagated from a dependency".
+- Rust tests 56 → 61, Python tests 18 → 20.
+
 ## [0.1.0] - 2026-04-25
 
 First public release. Eight AWS resource kinds, five scenario kinds, a
@@ -96,4 +139,5 @@ viewer.
 
 Internal-only. The public history starts with this release.
 
+[0.1.1]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.1
 [0.1.0]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.0

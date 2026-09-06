@@ -9,8 +9,8 @@
 
 ![demo](docs/demo.gif)
 
-**Status:** v0.1.0 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
-that gates pull requests, and a web viewer. **74 tests (56 Rust, 18 Python), CI green.**
+**Status:** v0.1.1 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
+that gates pull requests, and a web viewer. **81 tests (61 Rust, 20 Python), plus 6 for the viewer; CI green.**
 
 | | |
 |---|---|
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: veerarakesh56/helios/action@v0.1.0
+      - uses: veerarakesh56/helios/action@v0.1.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -154,12 +154,12 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**74 tests, all green in CI:**
+**81 tests, all green in CI (plus 6 for the web viewer):**
 
 | | |
 |---|---|
-| Rust | **56** across the graph, engine, SMT encoding, verify loop and CLI |
-| Python | **18** in `helios-ai/`, including syrupy snapshots of the model output |
+| Rust | **61** across the graph, engine, SMT encoding, verify loop and CLI |
+| Python | **20** in `helios-ai/`, including syrupy snapshots of the model output |
 
 CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite on every push.
 
