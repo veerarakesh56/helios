@@ -10,7 +10,14 @@
 ![demo](docs/demo.gif)
 
 **Status:** v0.1.1 — working and tested. 8 AWS resource kinds, 5 failure scenarios, a GitHub Action
-that gates pull requests, and a web viewer. **81 tests (61 Rust, 20 Python), plus 6 for the viewer; CI green.**
+that runs every scenario on a pull request and posts the verdict, and a web viewer. **81 tests
+(61 Rust, 20 Python), plus 6 for the viewer; CI green.**
+
+> The Action **reports**; it does not block. `action/scripts/run-scenarios.sh` captures `helios verify`'s
+> exit code inside `set +e` (its own comment: *"capture but don't abort"*) and `helios inspect` returns
+> success even when the chain has failures, so no step fails a check on a discovered failure. The gate is
+> the **CLI**: `simulate` and `verify` exit 1, so a workflow calling `helios simulate` directly does block.
+> Wiring that into the Action is a one-line change, deferred.
 
 | | |
 |---|---|
@@ -146,8 +153,11 @@ node for its Terraform attributes and the reason it failed.
 
 - **Rust + Z3 engine** — correctness is non-negotiable, so verdicts come from an SMT solver. Reads
   `terraform show -json` into a `petgraph::DiGraph`, encodes the scenario as constraints, and solves.
-- **Python + Claude shell** — narration, fix proposals, natural-language scenario parsing.
-  **The shell never decides what is safe.** It makes rigorous results readable.
+- **Python + Claude shell** — narration and fix proposals: `explain` and `propose-fix`, the only two
+  subcommands it has. **The shell never decides what is safe.** It makes rigorous results readable.
+  Scenario YAML is parsed in Rust (`crates/helios-engine/src/scenario.rs`) and an unknown kind is a
+  parse error; natural-language scenario parsing is a v0.2 plan (see `docs/ai-boundary.md`), not
+  shipped — the shell has no scenario module at all.
 
 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) is the deep dive;
 [`docs/ai-boundary.md`](./docs/ai-boundary.md) explains why the AI shell never produces a verdict.
