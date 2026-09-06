@@ -120,9 +120,24 @@ impl Encoder {
                         .map(|a| region_of_az(a))
                         .unwrap_or_else(|| DEFAULT_REGION.to_string());
                     let region_v = self.region_var(&region);
-                    let az_vars: Vec<Bool> = azs.iter().map(|a| self.az_var(a)).collect();
-                    let all_azs_down = Bool::and(&az_vars);
-                    Bool::or(&[all_azs_down, region_v])
+                    if azs.is_empty() {
+                        // No AZ information at all. `Bool::and(&[])` is Z3's empty conjunction and
+                        // evaluates to TRUE, so encoding "all of its zones are down" here would be
+                        // vacuously satisfied and the resource would be reported down in EVERY
+                        // scenario -- including one naming a zone nothing lives in. An unknown AZ
+                        // set means the AZ term must not contribute; the resource still falls with
+                        // its region. Its AZ behaviour is simply not modelled, so say so.
+                        tracing::warn!(
+                            resource = %r.id,
+                            "multi-AZ resource declares no availability_zones: its AZ behaviour is \
+                             NOT modelled (it will only fail with its region)"
+                        );
+                        region_v
+                    } else {
+                        let az_vars: Vec<Bool> = azs.iter().map(|a| self.az_var(a)).collect();
+                        let all_azs_down = Bool::and(&az_vars);
+                        Bool::or(&[all_azs_down, region_v])
+                    }
                 }
                 AvailabilityModel::Regional { region } => self.region_var(&region),
                 AvailabilityModel::GlobalEdge => Bool::from_bool(false),
@@ -587,6 +602,77 @@ mod encode_tests {
         assert!(
             ids.contains(&"aws_instance.web"),
             "web should fail after its role is revoked; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_multi_az_resource_with_no_zones_is_not_vacuously_down() {
+        // `Bool::and(&[])` is Z3's empty conjunction and evaluates to TRUE, so a multi-AZ resource
+        // whose `availability_zones` attribute is absent used to encode "all of its zones are
+        // down" as a tautology -- reported down in EVERY scenario, including one naming a zone
+        // nothing lives in. An unknown AZ set must contribute nothing; the resource still falls
+        // with its region.
+        const NO_ZONES: &str = r#"{
+          "format_version": "1.0",
+          "terraform_version": "1.9.0",
+          "values": { "root_module": { "resources": [
+            { "address": "aws_lb.naked", "type": "aws_lb", "mode": "managed", "name": "naked",
+              "values": { "id": "lb-1" } },
+            { "address": "aws_subnet.real", "type": "aws_subnet", "mode": "managed", "name": "real",
+              "values": { "id": "subnet-real", "availability_zone": "us-east-1a" } }
+          ] } }
+        }"#;
+
+        let graph = from_json(NO_ZONES).expect("fixture parses");
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+
+        let scenario = Scenario {
+            name: "lose-us-east-1a".into(),
+            kind: ScenarioKind::AzOutage {
+                az: "us-east-1a".into(),
+            },
+        };
+        enc.apply_scenario(&scenario, &graph, &solver);
+
+        assert_eq!(solver.check(), SatResult::Sat);
+        let chain = enc.extract_failures(&graph, &scenario, &solver);
+        let ids: Vec<&str> = chain.failures.iter().map(|f| f.id.as_str()).collect();
+        assert!(
+            !ids.contains(&"aws_lb.naked"),
+            "an ALB with no declared zones must not fail an AZ outage; got {ids:?}"
+        );
+        assert!(
+            ids.contains(&"aws_subnet.real"),
+            "the subnet actually in the dead zone must still fail; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_data_source_is_not_infrastructure_that_can_fail() {
+        // A data source describes infrastructure Terraform does not own, so it cannot fail.
+        // `RawResource` did not read `mode`, so `data.aws_subnet.selected` was ingested as a
+        // subnet and reported as a failed service -- a false positive.
+        const WITH_DATA_SOURCE: &str = r#"{
+          "format_version": "1.0",
+          "terraform_version": "1.9.0",
+          "values": { "root_module": { "resources": [
+            { "address": "data.aws_subnet.selected", "type": "aws_subnet", "mode": "data",
+              "name": "selected",
+              "values": { "id": "subnet-data", "availability_zone": "us-east-1a" } },
+            { "address": "aws_subnet.real", "type": "aws_subnet", "mode": "managed", "name": "real",
+              "values": { "id": "subnet-real", "availability_zone": "us-east-1a" } }
+          ] } }
+        }"#;
+
+        let graph = from_json(WITH_DATA_SOURCE).expect("fixture parses");
+        let ids: Vec<&str> = graph.node_indices().map(|i| graph[i].id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["aws_subnet.real"],
+            "only the managed subnet belongs in the graph; got {ids:?}"
         );
     }
 

@@ -54,7 +54,11 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // stderr, NOT stdout. `simulate --json` and `inspect` write a document to stdout that the
+    // GitHub Action redirects to a file and parses with `jq`; a warning on stdout corrupts it, so
+    // one skipped resource would break the PR comment on any real repository.
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(tracing_subscriber::EnvFilter::new(&cli.log_level))
         .init();
 

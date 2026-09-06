@@ -4,15 +4,48 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-09-06
+
+Three correctness bugs, all found by generating synthetic `terraform show -json` documents and
+**running** them — not by reading the code. None of them affect the shipped fixture, which is exactly
+why they survived: every existing test uses that one document.
+
+### Fixed
+
+- ⛔ **A multi-AZ resource with no `availability_zones` was reported down in EVERY scenario.**
+  `azs_from_subnets` returns an empty vec when the attribute is absent, and the encoder built
+  `Bool::and(&[])` — Z3's *empty conjunction*, which is `true`. So "all of its zones are down" was
+  vacuously satisfied. An `aws_lb` with no declared zones failed even under a scenario naming a zone
+  nothing lives in, and its reason string read `multi-AZ across []`. An unknown AZ set now
+  contributes nothing (the resource still falls with its region) and the run warns that the
+  resource's AZ behaviour is not modelled.
+- ⛔ **A data source of a modelled type was ingested as infrastructure.** `RawResource` never read
+  Terraform's `mode` field, so `data.aws_subnet.selected` became a subnet and was reported as a
+  failed service — a false positive about infrastructure Terraform does not even own. `mode` is now
+  read (defaulting to `managed`, so hand-written fixtures stay valid) and anything not managed is
+  skipped with a warning.
+- ⛔ **Diagnostics went to stdout, which corrupted the JSON the GitHub Action parses.**
+  `tracing_subscriber::fmt()` defaults to stdout; `action/scripts/run-scenarios.sh` redirects the
+  command's stdout into the document that `build-comment.sh` reads with `jq`. One skipped resource
+  would therefore break the PR comment on any real repository. Logs now go to stderr.
+- The `IamRevocation` doc comment still listed only `iam_role_arn` and `role_arn`; v0.1.1 added
+  `role`.
 
 ### Changed
 
-- **The default Claude model id is now `claude-opus-5`** (was `claude-opus-4-7`).
-  v0.1.1 made the id configurable via `HELIOS_AI_MODEL` but shipped a default
-  that was already behind the current model family, while this author's other
-  project was on `claude-sonnet-5` — the mechanism was fixed and the value was
-  left stale. Making a stale value overridable is not the same as updating it.
+- **The default Claude model id is now `claude-opus-5`** (was `claude-opus-4-7`). v0.1.1 made the id
+  configurable via `HELIOS_AI_MODEL` but shipped a default that was already behind the current model
+  family, while this author's other project was on `claude-sonnet-5` — the mechanism was fixed and
+  the value was left stale. Making a stale value overridable is not the same as updating it.
+- **The README no longer claims the GitHub Action "gates" pull requests** (it reports), nor that the
+  Python shell does "natural-language scenario parsing" (it has two subcommands and no scenario
+  module; YAML is parsed in Rust).
+
+### Testing
+
+- **83 tests** (63 Rust, 20 Python) plus 6 for the viewer. Two new regression tests: one asserts a
+  zone-less multi-AZ resource does **not** fail an AZ outage while the subnet actually in the dead
+  zone still does; one asserts a data source never enters the graph.
 
 ## [0.1.1] - 2026-09-06
 

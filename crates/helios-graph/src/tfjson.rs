@@ -31,8 +31,17 @@ pub struct RawResource {
     pub address: String,
     #[serde(rename = "type")]
     pub tf_type: String,
+    /// `"managed"` for real infrastructure, `"data"` for a data source. Terraform always emits it;
+    /// it defaults here so hand-written fixtures stay valid. A data source of a modelled type
+    /// (`data.aws_subnet.selected`) must NOT be treated as infrastructure that can fail.
+    #[serde(default = "default_mode")]
+    pub mode: String,
     #[serde(default)]
     pub values: Value,
+}
+
+fn default_mode() -> String {
+    "managed".to_string()
 }
 
 impl Module {

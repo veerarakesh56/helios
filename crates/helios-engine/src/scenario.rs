@@ -21,7 +21,8 @@ pub enum ScenarioKind {
     /// An entire AWS region goes dark.
     RegionOutage { region: String },
     /// An IAM principal (role ARN) is revoked. Resources whose attrs name
-    /// that principal (`iam_role_arn` or `role_arn`) lose access and fail.
+    /// that principal (`iam_role_arn`, `role_arn` or `role` — the attribute
+    /// `aws_lambda_function` actually uses) lose access and fail.
     /// v0.1 is a string match — v0.2 models IAM in the graph directly.
     IamRevocation { principal_arn: String },
     /// A multi-AZ RDS's failover window stretches past SLO — during that

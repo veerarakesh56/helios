@@ -66,9 +66,20 @@ pub(crate) fn build_graph(root: Module) -> Result<DiGraph<Resource, Dependency>,
         let RawResource {
             address,
             tf_type,
+            mode,
             values,
             ..
         } = raw;
+        // A data source describes infrastructure Terraform does not own. It cannot fail, and
+        // treating `data.aws_subnet.selected` as a subnet reports a failure that does not exist.
+        if mode != "managed" {
+            tracing::warn!(
+                address = %address,
+                mode = %mode,
+                "skipping non-managed resource (a data source cannot fail)"
+            );
+            continue;
+        }
         let Some(kind) = ResourceKind::from_tf_type(&tf_type) else {
             tracing::warn!(tf_type = %tf_type, "skipping unsupported resource type");
             continue;
