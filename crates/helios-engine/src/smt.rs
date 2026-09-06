@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use helios_graph::{Dependency, Resource, ResourceGraph};
-use helios_models::{availability_for, AvailabilityModel};
+use helios_models::{availability_for, infer_region, AvailabilityModel};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use z3::{ast::Bool, SatResult, Solver};
@@ -41,8 +41,19 @@ pub(crate) fn region_of_az(az: &str) -> String {
     }
 }
 
-/// Default region hard-coded for v0.1 (spec §6, matches `availability_for` default).
+/// Last-resort region, used only when NOTHING in the graph declares one.
+///
+/// Until 2026-09-06 this was the region every resource without an explicit `region` attribute got,
+/// which silently produced the wrong answer for any estate outside it: a eu-west-2 multi-AZ database
+/// survived a eu-west-2 outage and fell with a us-east-1 one. The region is now derived per resource
+/// (`helios_models::region_for`) with `infer_region` over the whole graph as the default.
 pub(crate) const DEFAULT_REGION: &str = "us-east-1";
+
+/// The region this graph is in: whatever most of its resources agree on, else [`DEFAULT_REGION`].
+fn graph_region(graph: &ResourceGraph) -> String {
+    infer_region(graph.node_indices().map(|i| &graph[i].attrs))
+        .unwrap_or_else(|| DEFAULT_REGION.to_string())
+}
 
 /// SMT encoding of a resource graph. One [`Encoder`] per simulation run.
 pub struct Encoder {
@@ -102,10 +113,13 @@ impl Encoder {
             self.forced_down
                 .insert(idx, Bool::new_const(format!("forced_{}", r.id)));
         }
+        // One inferred region for the whole graph, so the few resources that declare no region
+        // signal at all land where everything else is rather than in us-east-1.
+        let fallback_region = graph_region(graph);
         // Pass 2: assert the definition.
         for idx in graph.node_indices() {
             let r: &Resource = &graph[idx];
-            let model = availability_for(tf_type_of(&r.kind), &r.attrs, DEFAULT_REGION);
+            let model = availability_for(tf_type_of(&r.kind), &r.attrs, &fallback_region);
             let down = self.resource_down[&idx].clone();
             let cond: Bool = match model {
                 AvailabilityModel::SingleAz { az } => {
@@ -118,7 +132,7 @@ impl Encoder {
                     let region = azs
                         .first()
                         .map(|a| region_of_az(a))
-                        .unwrap_or_else(|| DEFAULT_REGION.to_string());
+                        .unwrap_or_else(|| fallback_region.clone());
                     let region_v = self.region_var(&region);
                     if azs.is_empty() {
                         // No AZ information at all. `Bool::and(&[])` is Z3's empty conjunction and
@@ -277,6 +291,8 @@ impl Encoder {
                 failures: vec![],
             };
         };
+        // Same derivation the encoding used, so a reason string can never disagree with the verdict.
+        let fallback_region = graph_region(graph);
         let mut failures = Vec::new();
         for (idx, down_bool) in &self.resource_down {
             let is_down = model
@@ -287,7 +303,7 @@ impl Encoder {
                 continue;
             }
             let r: &Resource = &graph[*idx];
-            let reason = reason_for(r, scenario);
+            let reason = reason_for(r, scenario, &fallback_region);
             failures.push(FailedResource {
                 id: r.id.clone(),
                 kind: format!("{:?}", r.kind),
@@ -304,8 +320,8 @@ impl Encoder {
 
 /// Short per-resource explanation for why this scenario takes it down.
 /// Purely derived from the availability model + scenario kind (no Z3 needed).
-fn reason_for(r: &Resource, scenario: &crate::Scenario) -> String {
-    let model = availability_for(tf_type_of(&r.kind), &r.attrs, DEFAULT_REGION);
+fn reason_for(r: &Resource, scenario: &crate::Scenario, fallback_region: &str) -> String {
+    let model = availability_for(tf_type_of(&r.kind), &r.attrs, fallback_region);
     match (&model, &scenario.kind) {
         (AvailabilityModel::SingleAz { az }, crate::ScenarioKind::AzOutage { az: s_az })
             if az == s_az =>
@@ -602,6 +618,78 @@ mod encode_tests {
         assert!(
             ids.contains(&"aws_instance.web"),
             "web should fail after its role is revoked; got {ids:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_default_region_estate_is_not_placed_in_us_east_1() {
+        // Until 2026-09-06 every resource without an explicit `region` attribute was placed in the
+        // hard-coded us-east-1, so a eu-west-2 estate SURVIVED a eu-west-2 outage and FELL with a
+        // us-east-1 one. Both directions are wrong answers, and nothing warned.
+        //
+        // The three resources below cover the three ways a region has to be found: from an ARN,
+        // from a declared zone, and — the Lambda — from nothing at all, which only the graph-wide
+        // inference can resolve.
+        const EU: &str = r#"{
+          "format_version": "1.0",
+          "terraform_version": "1.9.0",
+          "values": { "root_module": { "resources": [
+            { "address": "aws_db_instance.eu", "type": "aws_db_instance", "mode": "managed",
+              "name": "eu",
+              "values": { "id": "db-eu", "multi_az": true,
+                          "arn": "arn:aws:rds:eu-west-2:123456789012:db:eu" } },
+            { "address": "aws_subnet.eu_a", "type": "aws_subnet", "mode": "managed", "name": "eu_a",
+              "values": { "id": "sn-eu-a", "availability_zone": "eu-west-2a" } },
+            { "address": "aws_lambda_function.eu", "type": "aws_lambda_function",
+              "mode": "managed", "name": "eu", "values": { "id": "fn-eu" } }
+          ] } }
+        }"#;
+
+        let graph = from_json(EU).expect("fixture parses");
+
+        // Losing eu-west-2 must take all three down.
+        let solver = Solver::new();
+        let mut enc = Encoder::new();
+        enc.encode_availability(&graph, &solver);
+        enc.encode_dependencies(&graph, &solver);
+        let eu = Scenario {
+            name: "lose-eu-west-2".into(),
+            kind: ScenarioKind::RegionOutage {
+                region: "eu-west-2".into(),
+            },
+        };
+        enc.apply_scenario(&eu, &graph, &solver);
+        assert_eq!(solver.check(), SatResult::Sat);
+        let ids: Vec<String> = enc
+            .extract_failures(&graph, &eu, &solver)
+            .failures
+            .iter()
+            .map(|f| f.id.clone())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            3,
+            "a eu-west-2 outage must take the whole eu-west-2 estate down; got {ids:?}"
+        );
+
+        // And losing us-east-1 must take NOTHING down.
+        let solver2 = Solver::new();
+        let mut enc2 = Encoder::new();
+        enc2.encode_availability(&graph, &solver2);
+        enc2.encode_dependencies(&graph, &solver2);
+        let us = Scenario {
+            name: "lose-us-east-1".into(),
+            kind: ScenarioKind::RegionOutage {
+                region: "us-east-1".into(),
+            },
+        };
+        enc2.apply_scenario(&us, &graph, &solver2);
+        assert_eq!(solver2.check(), SatResult::Sat);
+        let untouched = enc2.extract_failures(&graph, &us, &solver2).failures;
+        assert!(
+            untouched.is_empty(),
+            "a us-east-1 outage must not touch a eu-west-2 estate; got {:?}",
+            untouched.iter().map(|f| &f.id).collect::<Vec<_>>()
         );
     }
 

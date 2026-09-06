@@ -532,7 +532,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-aws"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "helios-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "helios-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "helios-graph",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "helios-graph"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "insta",
  "petgraph",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "helios-models"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "pretty_assertions",
  "serde",

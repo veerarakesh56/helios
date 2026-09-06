@@ -4,6 +4,35 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-09-06
+
+### Fixed
+
+- ⛔⛔ **Helios silently gave the WRONG ANSWER for any estate outside `us-east-1`.** `region_of` read
+  only an explicit `region` attribute, which `terraform show -json` almost never carries, so every
+  other resource fell back to a hard-coded default. Measured, both directions wrong: a `eu-west-2`
+  multi-AZ database **survived** a `eu-west-2` region outage, and **fell** with a `us-east-1` one.
+  Nothing warned — the tool just answered incorrectly, which is the worst failure mode for something
+  whose selling point is that its answers are proofs.
+
+  The region is now derived from what Terraform does emit, in order: an explicit `region`, the
+  `availability_zone` it declares, the first of `availability_zones`, or the region field of any ARN
+  it carries (`arn:partition:service:REGION:...`, ignoring the empty field global services use).
+  A multi-AZ RDS still *guesses* which two zones it occupies — Terraform does not say — but it now
+  guesses inside the resource's own region.
+
+  ⭐ And because some resources carry no region signal at all (the shipped fixture's Lambda is one),
+  a per-resource rule is not enough on its own: `infer_region` takes the region the rest of the graph
+  agrees on and uses that as the fallback, so those resources land where their estate is rather than
+  in `us-east-1`. Ties break alphabetically, so the answer stays deterministic.
+
+### Testing
+
+- **84 tests** (64 Rust, 20 Python). A new regression test asserts both directions on a `eu-west-2`
+  estate whose region has to be found three different ways — from an ARN, from a declared zone, and
+  (the Lambda) from nothing at all: losing `eu-west-2` takes all three down, and losing `us-east-1`
+  takes **nothing** down. The five shipped scenarios are unchanged at 3 / 9 / 2 / 1 / 1.
+
 ## [0.1.2] - 2026-09-06
 
 Three correctness bugs, all found by generating synthetic `terraform show -json` documents and

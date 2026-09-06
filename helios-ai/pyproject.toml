@@ -1,6 +1,6 @@
 [project]
 name = "helios-ai"
-version = "0.1.2"
+version = "0.1.3"
 description = "Claude-powered explanation shell for the Helios deterministic infrastructure simulator."
 readme = "README.md"
 authors = [
