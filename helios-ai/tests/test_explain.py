@@ -25,7 +25,7 @@ def test_explain_sends_cache_markers(fake_client) -> None:
     assert isinstance(system, list)
     markers = [b for b in system if b.get("cache_control") == {"type": "ephemeral"}]
     assert len(markers) >= 2, "expected 2 cache breakpoints (system + glossary)"
-    assert call["model"] == "claude-opus-4-7"
+    assert call["model"] == "claude-opus-5"
 
 
 def test_explain_model_id_comes_from_env(fake_client, monkeypatch) -> None:

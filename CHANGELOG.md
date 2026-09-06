@@ -4,6 +4,16 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The default Claude model id is now `claude-opus-5`** (was `claude-opus-4-7`).
+  v0.1.1 made the id configurable via `HELIOS_AI_MODEL` but shipped a default
+  that was already behind the current model family, while this author's other
+  project was on `claude-sonnet-5` — the mechanism was fixed and the value was
+  left stale. Making a stale value overridable is not the same as updating it.
+
 ## [0.1.1] - 2026-09-06
 
 Correctness release. Every item below was found by running the shipped fixture
@@ -36,7 +46,8 @@ through every shipped scenario and reading the output, not the code.
   `private_key`, `access_key`, `credential` or `api_key` are now replaced with
   `<redacted>` (keys kept, nested objects included).
 - **The Claude model id was hard-coded** in two files. `HELIOS_AI_MODEL` now
-  overrides the default (`claude-opus-4-7`) without a code change.
+  overrides the default without a code change. (The default value itself was
+  brought current after this release — see Unreleased.)
 - Workspace and package versions were still `0.0.1` under a `v0.1.0` release;
   both now carry the release version.
 

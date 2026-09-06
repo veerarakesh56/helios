@@ -18,7 +18,7 @@ from typing import Any
 from .glossary import AVAILABILITY_MODEL_GLOSSARY
 from .models import FailureChain
 
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "claude-opus-5"
 MAX_TOKENS = 16000
 
 

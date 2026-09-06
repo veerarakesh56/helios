@@ -63,7 +63,7 @@ def test_propose_fix_sends_two_cache_breakpoints(fake_client) -> None:
     call = fake_client.messages.calls[0]
     markers = [b for b in call["system"] if b.get("cache_control") == {"type": "ephemeral"}]
     assert len(markers) == 2, "expected 2 cache breakpoints (persona + glossary)"
-    assert call["model"] == "claude-opus-4-7"
+    assert call["model"] == "claude-opus-5"
 
 
 def test_propose_fix_model_id_comes_from_env(fake_client, monkeypatch) -> None:
