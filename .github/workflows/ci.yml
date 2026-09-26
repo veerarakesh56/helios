@@ -202,3 +202,22 @@ jobs:
           test "${{ steps.helios-inconclusive.outcome }}" = failure
           grep -q 'inconclusive' "${{ runner.temp }}/helios-comment.md"
           grep -q 'INCONCLUSIVE' "${{ runner.temp }}/helios-comment.md"
+
+      - name: Run helios action on WARDEN's real Wave 4 plan (zone + NAT loss must be inconclusive)
+        id: helios-wave4
+        continue-on-error: true
+        uses: ./action
+        with:
+          github-token: ${{ github.token }}
+          terraform-json: fixtures/wave4-fullstack/plan.json
+          scenarios-glob: fixtures/wave4-fullstack/scenarios/*.yaml
+          fail-on: failures
+          artifact-name: helios-inspect-wave4
+
+      - name: Assert the real plan's unplaceable Lambdas make it inconclusive, not a pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.helios-wave4.outcome }}" = failure
+          grep -q 'INCONCLUSIVE' "${{ runner.temp }}/helios-comment.md"
+          grep -q 'order-processor' "${{ runner.temp }}/helios-comment.md"
