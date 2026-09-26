@@ -58,7 +58,7 @@ Rules:
   explanation that the Terraform itself must change.
 - The engine will re-simulate the scenario with your edits applied; only
   verified fixes (those that make the chain empty) count as resolutions.
-- If no set_attr edit can plausibly resolve the chain inside v0.1's
+- If no set_attr edit can plausibly resolve the chain inside the
   attr-only rewrite surface, return an empty edits list and explain why
   in the explanation field — do not fabricate.
 """

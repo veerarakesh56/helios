@@ -23,7 +23,8 @@ pub enum ScenarioKind {
     /// An IAM principal (role ARN) is revoked. Resources whose attrs name
     /// that principal (`iam_role_arn`, `role_arn` or `role` — the attribute
     /// `aws_lambda_function` actually uses) lose access and fail.
-    /// v0.1 is a string match — v0.2 models IAM in the graph directly.
+    /// A string match (plus, on a plan, the `aws_iam_role` a reference names); IAM itself is not
+    /// modelled as graph nodes, so policy chains do not propagate.
     IamRevocation { principal_arn: String },
     /// A multi-AZ RDS's failover window stretches past SLO — during that
     /// window the DB is unreachable. Modeled as forcing that specific

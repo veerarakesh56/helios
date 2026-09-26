@@ -9,10 +9,10 @@
 
 ![demo](docs/demo.gif)
 
-**Status:** v0.1.4 released; `main` carries the unreleased 0.2.0 work (see the changelog): 18 AWS
-resource kinds, 6 failure scenarios, `terraform show -json` of a state *or a saved plan*, a GitHub
-Action that runs every scenario on a pull request and posts the verdict, and a web viewer.
-**200 tests (148 Rust, 52 Python), plus 7 for the viewer and 7 for the publish guards.**
+**Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
+*or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
+and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
+**216 tests (161 Rust, 55 Python), plus 7 for the viewer and 9 for the publish guards.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
 > artifacts are posted, it fails the job when any scenario has failures and no committed fix, its fix
@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: veerarakesh56/helios/action@v0.1.4
+      - uses: veerarakesh56/helios/action@v0.2.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on: failures   # optional; default `never` only reports

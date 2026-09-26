@@ -69,7 +69,7 @@ not hallucinating?* We do not trust the proposal. We re-verify it.
 | Constraint solving | No | Z3. Correctness is the entire point |
 | Counter-example narration | Yes (Claude Opus) | Translates an SMT model into English |
 | Fix proposal | Yes (Claude Opus) | Suggests `set_attr` edits, then **re-verified by engine** |
-| Plain-English scenario parser (v0.2) | Yes (Claude Sonnet) | "what if us-east-1 goes down" -> scenario YAML |
+| Plain-English scenario parser (not implemented) | Would | "what if us-east-1 goes down" -> scenario YAML |
 
 ## Providers, and why the model gets no tools
 
@@ -149,7 +149,7 @@ that produced the candidate.
 
 If you are evaluating Helios for use in your CI pipeline, the question to
 ask is not "what model do you use?" -- the model is a moving target -- but
-"what does the oracle prove?". For Helios v0.1, the oracle proves: *the
+"what does the oracle prove?". The oracle proves: *the
 post-fix graph contains no resources whose `failed` boolean is forced true
 by the scenario constraints.* That is a small statement. It is also a true
 statement, every time.

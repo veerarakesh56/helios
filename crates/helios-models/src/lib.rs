@@ -81,8 +81,8 @@ pub fn availability_for(tf_type: &str, attrs: &Value, default_region: &str) -> A
             }
         }
         "aws_elasticache_cluster" => {
-            // Replication is configured via a separate aws_elasticache_replication_group
-            // resource which we don't parse in v0.1. Treat plain clusters as SingleAz.
+            // One node. Replication is an aws_elasticache_replication_group, its own kind
+            // (spread over its members); a plain cluster is SingleAz.
             AvailabilityModel::SingleAz {
                 az: string_attr(attrs, "availability_zone")
                     .unwrap_or_else(|| format!("{default_region}a")),

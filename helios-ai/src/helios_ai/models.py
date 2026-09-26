@@ -32,8 +32,8 @@ class FailureChain(BaseModel):
 class FixEdit(BaseModel):
     """A single structural edit on a resource's Terraform attrs.
 
-    v0.1 only supports `op: "set_attr"`. `add_resource` / `remove_resource`
-    land in v0.2 alongside the richer graph write surface in helios-engine.
+    Only `op: "set_attr"` exists; adding or removing a resource is not implemented, and the
+    engine refuses an edit that would move one (helios-engine fix::PLACEMENT_KEYS).
     """
 
     model_config = ConfigDict(extra="forbid")

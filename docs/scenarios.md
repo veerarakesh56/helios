@@ -53,9 +53,9 @@ kind:
 
 Fails any resource whose `attrs.iam_role_arn`, `attrs.role_arn` or `attrs.role`
 (the attribute `aws_lambda_function` actually uses) matches the principal, plus
-everything those resources contain. v0.1 is a string match over the
-Terraform-JSON attr set; modelling IAM as graph nodes so multi-hop policy chains
-propagate is future work. `node_role_arn` (EKS node groups) is read too.
+everything those resources contain. It is a string match over the
+Terraform-JSON attr set; IAM is not modelled as graph nodes, so multi-hop policy
+chains do not propagate. `node_role_arn` (EKS node groups) is read too.
 
 On a **plan**, role ARNs are unknown until apply. A resource whose role attribute
 references an `aws_iam_role` in the plan is matched through it: `principal_arn`

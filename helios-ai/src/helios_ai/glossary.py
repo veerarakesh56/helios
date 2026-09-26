@@ -115,8 +115,8 @@ resource uses is an error. A chain handed to you never comes from such a run.
 - **region-outage** { region }: an entire region offline. Only GlobalEdge
   resources survive.
 - **iam-revocation** { principal_arn }: a role/principal is revoked.
-  v0.1 is a string match on `attrs.iam_role_arn`, `attrs.role_arn` or
-  `attrs.role`; any resource naming that principal fails (dependents cascade
+  A string match on `attrs.iam_role_arn`, `attrs.role_arn`, `attrs.role` or
+  `attrs.node_role_arn`; any resource naming that principal fails (dependents cascade
   via Contains). Its availability zone stays up.
 - **slow-rds-failover** { db_id }: an RDS failover takes longer than
   expected. The target alone is forced unavailable: an aws_db_instance, an

@@ -15,7 +15,7 @@ helios/
 │   ├── helios-graph/              # Terraform JSON -> typed resource graph
 │   ├── helios-models/             # availability models per resource kind
 │   ├── helios-engine/             # Z3 SMT engine, scenario, fix, verify
-│   └── helios-aws/                # (stub for v0.2) AWS API client
+│   └── helios-aws/                # stub, not implemented: AWS API client
 ├── helios-ai/                     # Python shell (uv-managed)
 │   ├── pyproject.toml
 │   └── src/helios_ai/
@@ -148,7 +148,7 @@ Six subcommands:
 ### `helios-aws`
 
 Stub crate. Will hold the live-state ingestion path (AWS API responses
-merged into the graph for drift detection). Deferred to v0.2.
+merged into the graph for drift detection). Not implemented.
 
 ## The Python shell (`helios-ai/`)
 
@@ -178,9 +178,9 @@ cytoscape canvas with kind-keyed pastels, failed resources red, `Contains`
 edges thick + solid, `MemberOf` edges thin + dashed, `Spread` edges medium +
 dotted, breadthfirst layout.
 
-The viewer is local-only in v0.1: file picker, paste-textarea, "Load
-sample" button. Workflow-artifact deep-linking via `?artifact=<url>` is
-deferred to v0.2.
+The viewer is local-only: file picker, paste-textarea, "Load sample"
+button. Workflow-artifact deep-linking via `?artifact=<url>` is not
+implemented.
 
 ## The GitHub Action (`action/`)
 

@@ -2,8 +2,8 @@
 //! the engine's [`apply_fix`] applies them to a graph clone and
 //! [`crate::verify()`] re-runs simulate to confirm they resolve the chain.
 //!
-//! v0.1 supports only the `set_attr` op. `add_resource` / `remove_resource`
-//! land in v0.2 when the Pydantic + graph write surface grows.
+//! Only the `set_attr` op exists; adding or removing a resource is not implemented, and an edit
+//! that would move one is refused ([`PLACEMENT_KEYS`]).
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -140,7 +140,7 @@ pub fn load(path: &Path) -> Result<FixProposal, FixError> {
 /// Apply a [`FixProposal`] to a clone of `graph` and return the patched graph.
 ///
 /// The original graph is untouched. Only `set_attr` edits are supported in
-/// v0.1; unknown resources and non-object attrs surface as [`FixError`].
+/// here; unknown resources and non-object attrs surface as [`FixError`].
 pub fn apply_fix(
     graph: &helios_graph::ResourceGraph,
     fix: &FixProposal,
