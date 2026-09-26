@@ -10,12 +10,14 @@ scrubber tested against text that does not look like a secret proves nothing.
 from __future__ import annotations
 
 import json
+import re
 import pathlib
 import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_publishable  # noqa: E402
 import scrub_tfjson  # noqa: E402
@@ -24,6 +26,8 @@ ACCOUNT = "987654321098"
 PUBLIC_IP = "54.23.10.7"
 SUBNET = "subnet-0123456789abcdef0"
 VPC = "vpc-0fedcba9876543210"
+ALB_ID = "abeeb3492689b54c"
+UUID = "6ed06e77-c363-4349-1584-ca21c7f7f5b6"
 SECRETS = ["hunter2-db-master", "Rand0m-Result-Value", "env-api-key-value", "s3cr3t-constant"]
 
 PLAN = {
@@ -49,6 +53,12 @@ PLAN = {
                              "security_group_ids": ["sg-0aaaabbbbccccdddd"]}],
              "environment": [{"variables": {"API_KEY": "env-api-key-value",
                                             "UPSTREAM": PUBLIC_IP}}]}},
+        {"address": "aws_lb.web", "mode": "managed", "type": "aws_lb", "name": "web", "values": {
+            "arn": f"arn:aws:elasticloadbalancing:eu-west-2:{ACCOUNT}:loadbalancer/app/web/{ALB_ID}",
+            "subnets": [SUBNET]}},
+        {"address": "aws_eks_node_group.ng", "mode": "managed", "type": "aws_eks_node_group",
+         "name": "ng", "values": {"arn": f"arn:aws:eks:eu-west-2:{ACCOUNT}:nodegroup/c/ng/{UUID}",
+                                  "subnet_ids": [SUBNET]}},
         {"address": "aws_nat_gateway.nat", "mode": "managed", "type": "aws_nat_gateway",
          "name": "nat", "values": {"subnet_id": SUBNET, "public_ip": PUBLIC_IP}},
         {"address": "random_password.db", "mode": "managed", "type": "random_password",
@@ -92,7 +102,8 @@ class ScrubTfjson(unittest.TestCase):
         self.assertEqual(self.out["format_version"], "1.2")
         types = [r["type"] for r in self.out["planned_values"]["root_module"]["resources"]]
         self.assertEqual(types, ["aws_vpc", "aws_subnet", "aws_db_instance",
-                                 "aws_lambda_function", "aws_nat_gateway"])
+                                 "aws_lambda_function", "aws_lb", "aws_eks_node_group",
+                                 "aws_nat_gateway"])
         vpc = self.out["planned_values"]["root_module"]["resources"][0]["values"]
         self.assertEqual(vpc["tags"], {"Name": "main"})
         self.assertIn(":123456789012:", vpc["arn"])
@@ -110,6 +121,15 @@ class ScrubTfjson(unittest.TestCase):
         self.assertEqual(res["aws_subnet.a"]["vpc_id"], res["aws_vpc.main"]["id"])
         self.assertNotEqual(subnet_id, res["aws_vpc.main"]["id"])
 
+    def test_load_balancer_ids_and_uuids_replaced(self) -> None:
+        self.assertNotIn(ALB_ID, self.text)
+        self.assertNotIn(UUID, self.text)
+        resources = self.out["planned_values"]["root_module"]["resources"]
+        res = {r["address"]: r["values"] for r in resources}
+        self.assertTrue(res["aws_lb.web"]["arn"].endswith("/app/web/0000000000000001"))
+        self.assertTrue(res["aws_eks_node_group.ng"]["arn"].endswith(
+            "/ng/00000000-0000-0000-0000-a00000000001"))
+
     def test_references_kept_constants_dropped(self) -> None:
         cfg = {r["address"]: r for r in self.out["configuration"]["root_module"]["resources"]}
         self.assertEqual(cfg["aws_subnet.a"]["expressions"],
@@ -117,6 +137,18 @@ class ScrubTfjson(unittest.TestCase):
         self.assertEqual(cfg["aws_db_instance.db"]["expressions"],
                          {"db_subnet_group_name": {"references": ["aws_db_subnet_group.db.name"]}})
         self.assertNotIn("random_password.db", cfg)
+
+
+class ScrubKeepsWhatHeliosReads(unittest.TestCase):
+    """A type the scrubber drops is a fixture that disagrees with the real input: the Wave 4 plan's
+    IAM scenarios went from a verdict to INCONCLUSIVE because `aws_iam_role` was dropped."""
+
+    def test_every_type_the_graph_reads_is_kept(self) -> None:
+        src = (ROOT / "crates/helios-graph/src/resource.rs").read_text(encoding="utf-8")
+        tables = [src.split(f"const {name}")[1].split("];")[0] for name in ("KINDS", "LINK_ONLY")]
+        read = {t for table in tables for t in re.findall(r'"(aws_[a-z0-9_]+)"', table)}
+        self.assertGreaterEqual(len(read), 27)  # 18 kinds + 9 link-only
+        self.assertEqual(sorted(read - scrub_tfjson.KEEP_TYPES), [])
 
 
 class CheckPublishable(unittest.TestCase):

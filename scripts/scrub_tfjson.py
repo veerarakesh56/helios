@@ -17,7 +17,8 @@ This keeps ONLY:
 
 Then, in every remaining string: 12-digit account ids become 123456789012, and real resource ids
 (`subnet-`, `vpc-`, `vpce-`, `nat-`, `rtb-`, `sg-`, `igw-`, `eni-`, `i-` with 8 or 17 hex digits,
-and any other 17-hex id) become deterministic placeholders, the same one everywhere the id appears.
+any other 17-hex id, the 16-hex id a load balancer ARN ends in, and UUIDs) become deterministic
+placeholders, the same one everywhere the id appears.
 
 It is an allowlist, so a new attribute is dropped until someone adds it here on purpose.
 Stdlib only.
@@ -40,6 +41,7 @@ KEEP_TYPES = {
     "aws_ecs_cluster", "aws_ecs_service", "aws_eks_cluster", "aws_eks_node_group",
     "aws_sqs_queue", "aws_lambda_event_source_mapping", "aws_vpc_endpoint",
     "aws_nat_gateway", "aws_route_table", "aws_route", "aws_route_table_association",
+    "aws_main_route_table_association", "aws_default_route_table", "aws_iam_role",
 }
 
 # One allowlist for every kept type (and their nested blocks): these names mean the same topology
@@ -65,6 +67,7 @@ KEEP_ATTRS = {
     "redrive_policy", "event_source_arn",
     # routing
     "nat_gateway_id", "gateway_id", "route", "route_table_id", "route_table_ids",
+    "default_route_table_id",
     "destination_cidr_block",
     # IAM principals (iam-revocation)
     "role", "role_arn", "iam_role_arn", "node_role_arn", "iam_instance_profile",
@@ -82,6 +85,10 @@ ID_RE = re.compile(
     r"\b(?:(subnet|vpc|vpce|nat|rtb|sg|igw|eni|i)-[0-9a-f]{8}"
     r"|(?:([a-z][a-z0-9]*)-)?[0-9a-f]{17})\b"
 )
+# The 16-hex id a load balancer / target group ARN ends in (`.../app/<name>/<id>`), and UUIDs
+# (an event-source mapping's id, the end of a node group's ARN).
+ELB_ID_RE = re.compile(r"(?<=/)[0-9a-f]{16}\b")
+UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
 class Scrubber:
@@ -97,8 +104,17 @@ class Scrubber:
             self.ids[real] = f"{prefix}-{n:017x}" if prefix else f"{n:017x}"
         return self.ids[real]
 
+    def _numbered(self, real: str, kind: str, fmt: str) -> str:
+        if real not in self.ids:
+            n = self.counters[kind] = self.counters.get(kind, 0) + 1
+            self.ids[real] = fmt.format(n)
+        return self.ids[real]
+
     def text(self, s: str) -> str:
-        return ID_RE.sub(self._placeholder, ACCOUNT_RE.sub(PLACEHOLDER_ACCOUNT, s))
+        # Account first; the UUID placeholder starts its last group with a letter, so it is never an account id.
+        s = ID_RE.sub(self._placeholder, ACCOUNT_RE.sub(PLACEHOLDER_ACCOUNT, s))
+        s = UUID_RE.sub(lambda m: self._numbered(m[0], "uuid", "00000000-0000-0000-0000-a{:011x}"), s)
+        return ELB_ID_RE.sub(lambda m: self._numbered(m[0], "elb", "{:016x}"), s)
 
     def strings(self, v: Any) -> Any:
         """Rewrite account and resource ids in every string (keys too), in document order."""

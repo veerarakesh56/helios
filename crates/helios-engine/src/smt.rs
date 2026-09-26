@@ -394,6 +394,7 @@ impl Encoder {
             let reason = reason_for(r, &model_of(graph, *idx, &fallback_region), scenario)
                 .or_else(|| group_reason(graph, *idx, &fallback_region, is_down))
                 .or_else(|| egress_reason(graph, *idx, is_down))
+                .or_else(|| contains_reason(graph, *idx, is_down))
                 .unwrap_or_else(|| "failure propagated from a dependency".to_string());
             failures.push(FailedResource {
                 id: r.id.clone(),
@@ -592,6 +593,19 @@ fn group_reason(
         })
 }
 
+/// Why a resource fell with the thing it is inside: names that parent and the attribute that
+/// points at it (`its subnet_id aws_subnet.a is down`), not just "a dependency".
+fn contains_reason(
+    graph: &ResourceGraph,
+    idx: NodeIndex,
+    is_down: impl Fn(&NodeIndex) -> bool,
+) -> Option<String> {
+    graph
+        .edges_directed(idx, petgraph::Direction::Outgoing)
+        .find(|e| matches!(e.weight(), Dependency::Contains(_)) && is_down(&e.target()))
+        .map(|e| format!("its {} {} is down", e.weight().via(), graph[e.target()].id))
+}
+
 /// Why a compute resource fell because a subnet it runs in lost its egress.
 fn egress_reason(
     graph: &ResourceGraph,
@@ -699,13 +713,23 @@ pub(crate) fn names_principal(r: &Resource, principal: &str) -> bool {
         })
 }
 
-/// Subnets whose egress (route table, NAT) is unknown: a NAT's death cannot be evaluated.
+/// Why a NAT's death cannot be evaluated: subnets whose egress (route table, NAT) is unknown, and
+/// compute whose subnets are unknown -- it may run in a subnet that routes through that NAT. The
+/// second is WARDEN's Wave 4 plan: its Lambdas' `dynamic "vpc_config"` names no subnet, and a NAT
+/// death reported the NAT alone, where the applied state loses three Lambdas with it.
 pub(crate) fn egress_unknown(graph: &ResourceGraph) -> Vec<String> {
     graph
         .node_indices()
         .map(|i| &graph[i])
-        .filter(|r| r.unresolved.iter().any(|w| w.starts_with("egress unknown")))
-        .map(|r| r.id.clone())
+        .filter_map(|r| {
+            r.unresolved
+                .iter()
+                .find(|w| {
+                    w.starts_with("egress unknown")
+                        || (is_compute(r.kind) && w.ends_with("names no subnet Helios can place"))
+                })
+                .map(|w| format!("{} ({w})", r.id))
+        })
         .collect()
 }
 

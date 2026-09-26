@@ -239,16 +239,13 @@ pub(crate) fn build_graph(
     let entry = |raw, node| Entry::new(raw, config, node);
     // Unsupported type -> how many resources of it were skipped: ONE summary line, not one each.
     let mut skipped: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut data_sources: Vec<&str> = Vec::new();
 
     for raw in &raw_resources {
         // A data source describes infrastructure Terraform does not own. It cannot fail, and
         // treating `data.aws_subnet.selected` as a subnet reports a failure that does not exist.
         if raw.mode != "managed" {
-            tracing::warn!(
-                address = %raw.address,
-                mode = %raw.mode,
-                "skipping non-managed resource (a data source cannot fail)"
-            );
+            data_sources.push(&raw.address);
             continue;
         }
         let Some(kind) = ResourceKind::from_tf_type(&raw.tf_type) else {
@@ -280,6 +277,14 @@ pub(crate) fn build_graph(
         entries.push(entry(raw, Some(node)));
     }
 
+    if !data_sources.is_empty() {
+        // Not a warning: nothing is lost. One line, so a real warning is not buried under them.
+        tracing::info!(
+            "ignored {} data sources (they cannot fail): {}",
+            data_sources.len(),
+            data_sources.join(", ")
+        );
+    }
     if !skipped.is_empty() {
         let mut by_count: Vec<(&str, usize)> = skipped.into_iter().collect();
         by_count.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));

@@ -450,5 +450,5 @@ fn an_instance_in_a_subnet_that_is_itself_down_is_explained_by_the_subnet_first(
         .iter()
         .find(|(id, _)| id == "aws_instance.app[0]")
         .expect("app[0] down");
-    assert_eq!(why, "failure propagated from a dependency");
+    assert_eq!(why, "its subnet_id aws_subnet.private[0] is down");
 }

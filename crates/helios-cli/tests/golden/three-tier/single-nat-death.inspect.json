@@ -182,7 +182,7 @@
       {
         "id": "aws_instance.web",
         "kind": "Instance",
-        "reason": "failure propagated from a dependency"
+        "reason": "its subnet_id aws_subnet.public_a is down"
       },
       {
         "id": "aws_subnet.public_a",

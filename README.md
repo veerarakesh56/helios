@@ -72,8 +72,9 @@ make demo
 failure chain through the AI shell, applies a structured fix proposal, and re-verifies. It runs
 mocked (`HELIOS_AI_MOCK=1`, no network) unless you say otherwise.
 
-For a real run, `uv sync` in `helios-ai/`, set `ANTHROPIC_API_KEY`, and run
-`make demo HELIOS_AI_MOCK=0`. `helios explain` uses `HELIOS_AI_PYTHON` if set, else
+For a real run, `uv sync` in `helios-ai/`, then either set `ANTHROPIC_API_KEY`, or set
+`HELIOS_AI_PROVIDER=claude_cli` to use a logged-in `claude` CLI (a Claude Max plan, no API key; see
+`helios-ai/README.md`), and run `make demo HELIOS_AI_MOCK=0`. `helios explain` uses `HELIOS_AI_PYTHON` if set, else
 `helios-ai/.venv` when run from the repo root, else `python` on PATH.
 
 **Windows:** the build downloads Z3 and links `libz3.dll`, which is not copied next to `helios.exe`.
@@ -215,7 +216,8 @@ CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite o
   subnets), the subnet gets the NAT set every table it could be in agrees on; if they disagree —
   or a route table or default route is named through a local or variable — the egress of a subnet
   with compute in it is **unknown**, and a zone outage in the region, or losing a NAT, is
-  inconclusive.
+  inconclusive. So is losing a NAT while any compute's subnets cannot be placed (a Lambda whose
+  `vpc_config` is a `dynamic` block): it may route through that NAT.
 - **Regions come from the resources, else their provider.** A plan has no ARNs: a resource with
   no zone or `region` of its own takes its provider's constant `region`. Local and Wavelength
   Zones belong to their parent region.
@@ -241,7 +243,14 @@ CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite o
   failover takes time, and `slow-rds-failover` exists precisely because that assumption is the
   interesting one to break.
 - **Six scenario kinds** is not the space of real outages. It covers ones that recur.
-- **The AI shell needs an API key** for real narration. The engine does not — simulation and
+- **Losing a queue does not fail its consumers.** Helios models whether a resource is up, not
+  whether data flows: a Lambda's event-source queue and a queue's dead-letter queue are
+  `MemberOf` edges, which do not propagate. `resource-loss` of a queue reports the queue alone.
+- **Only what Terraform manages is visible.** Kubernetes workloads on an EKS node group, and
+  anything created outside Terraform (a database made by a script, a console change), are not in
+  the graph: losing the node group is reported, the pods on it are not.
+- **The AI shell needs a model** for real narration: an Anthropic API key, or the `claude` CLI
+  logged in (`HELIOS_AI_PROVIDER=claude_cli`). The engine does not — simulation and
   verification run entirely offline, and `HELIOS_AI_MOCK=1` exercises the whole pipeline with no
   network at all.
 

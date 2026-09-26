@@ -120,8 +120,7 @@ pub fn simulate(graph: &ResourceGraph, scenario: &Scenario) -> Result<FailureCha
         let unknown = crate::smt::egress_unknown(graph);
         if hosts_nat && !unknown.is_empty() {
             return Err(SimulateError::Inconclusive(format!(
-                "cannot tell which subnets lose egress with {id}: the route table or NAT of {} \
-                 is unknown",
+                "cannot tell what would lose egress with {id}: {}",
                 unknown.join(", ")
             )));
         }

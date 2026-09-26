@@ -58,12 +58,34 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plan derived from it the way `terraform show -json <planfile>` renders it — including the real
   config's gap: the Lambdas' `dynamic "vpc_config"` has no references — with exact-failure-set
   tests, plus NAT, plan-reference, resolver and "not a pass" tests.
+- `fixtures/wave4-fullstack/`: WARDEN's Wave 4 stack **as it ran on AWS** (2026-09-26), scrubbed:
+  the applied state, a plan of the same configuration against an empty state, and ten scenarios
+  (each zone, the region, the NAT, Redis, the node group, a queue, two roles).
+  `crates/helios-engine/tests/wave4_real.rs` locks the exact failure sets, cross-checked against
+  the live account's placement (subnets, NAT, the EKS node, ECS tasks, Redis members, endpoints).
+  The scrubbed fixtures give the same verdicts as the raw documents for all ten scenarios, on both.
 - **Inconclusive is a result.** `SimulateError::Inconclusive`; the CLI exits **3** with nothing on
   stdout; the Action records `<stem>.inconclusive.txt`, shows it in the PR comment and fails the
   `fail-on: failures` gate. See the ⛔ entries under Fixed for what triggers it.
 
 ### Fixed
 
+- **Losing a NAT on a plan could under-report.** When some compute's subnets could not be placed
+  (WARDEN's Wave 4 Lambdas: `dynamic "vpc_config"`), `single-nat-death` returned the NAT alone as
+  a verdict; the applied state loses three Lambdas with it. It is now **inconclusive** (exit 3),
+  naming them, as a zone outage already was.
+- `scripts/scrub_tfjson.py` dropped `aws_iam_role`, `aws_main_route_table_association` and
+  `aws_default_route_table` (and the `default_route_table_id` attribute), all of which Helios reads:
+  a scrubbed plan turned `iam-revocation` verdicts into INCONCLUSIVE. A test now reads the type
+  tables in `resource.rs` and fails when the scrubber would drop one. It also left the 16-hex id of
+  a load balancer ARN and UUIDs (event-source mappings, node groups) in place; they are now
+  placeholders.
+- A resource that fails with the thing it is inside (an instance with its subnet, a service with its
+  cluster, a NAT gateway with its zone's subnet) read "failure propagated from a dependency". It now
+  names the parent and the attribute: `its subnet_id aws_subnet.public_a is down`. The only change
+  in the golden outputs: the `single-nat-death` reason for `aws_instance.web`.
+- Data sources were logged as one WARN line each (six on WARDEN's Wave 4 state), burying real
+  warnings. They are now one INFO line listing them: a data source cannot fail, so nothing is lost.
 - `rust-version` said 1.75; the dependency tree needs **1.88** (`time`, `zip`). Declared and checked in CI.
 - `make` recipes `cd helios-ai` and then ran a *relative* `HELIOS_AI_PYTHON`, and broke on a checkout
   path with a space. The path is now absolute and quoted. `make demo` now defaults to
