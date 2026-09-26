@@ -64,10 +64,8 @@ pub fn load_with_source<P: AsRef<Path>>(path: P) -> Result<(ResourceGraph, Sourc
 pub fn decode_text(bytes: Vec<u8>) -> std::io::Result<String> {
     let invalid = |e: String| std::io::Error::new(std::io::ErrorKind::InvalidData, e);
     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
-        let units: Vec<u16> = rest
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let (pairs, _odd_byte) = rest.as_chunks::<2>();
+        let units: Vec<u16> = pairs.iter().map(|&p| u16::from_le_bytes(p)).collect();
         return String::from_utf16(&units).map_err(|e| invalid(e.to_string()));
     }
     let text = String::from_utf8(bytes).map_err(|e| invalid(e.to_string()))?;
