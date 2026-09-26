@@ -34,19 +34,50 @@ helios/
 ### `helios-graph`
 
 Reads `terraform show -json` output and builds a `petgraph::DiGraph<R, D>`
-keyed on Terraform addresses (e.g. `aws_subnet.public_a`). Eight resource
-kinds in v0.1: `aws_vpc`, `aws_subnet`, `aws_instance`, `aws_lb`,
-`aws_db_instance`, `aws_elasticache_cluster`, `aws_lambda_function`,
-`aws_s3_bucket`. Edges are derived structurally:
+keyed on Terraform addresses (e.g. `aws_subnet.public_a`). Eighteen resource
+kinds: `aws_vpc`, `aws_subnet`, `aws_instance`, `aws_lb`, `aws_db_instance`,
+`aws_elasticache_cluster`, `aws_lambda_function`, `aws_s3_bucket`,
+`aws_rds_cluster`, `aws_rds_cluster_instance`,
+`aws_elasticache_replication_group`, `aws_ecs_cluster`, `aws_ecs_service`,
+`aws_eks_cluster`, `aws_eks_node_group`, `aws_sqs_queue`, `aws_vpc_endpoint`,
+`aws_nat_gateway`; nine more (subnet groups, event source mappings, route
+tables and their associations, IAM roles) are read only to resolve edges.
+Edges are derived structurally:
 
 - `Contains(via_attr)` -- e.g. `subnet -> vpc` via `vpc_id`.
-- `MemberOf(via_attr)` -- e.g. `instance -> alb` via `target_group_arn`.
+- `MemberOf(via_attr)` -- e.g. `alb -> subnet` via `subnets`.
+- `Spread(via_attr)` -- one member of a placement group: every Spread edge
+  out of a resource with the same `via` is one group (an ECS service's
+  subnets, an Aurora cluster's instances).
+- `Egress(via_attr)` -- `subnet -> NAT gateway` via the default route
+  (`nat_gateway_id`): compute in the subnet loses egress with the NAT; the
+  subnet and non-compute resources do not.
+
+Each resource also records what the graph could not determine: `unresolved`
+(a zone-deciding attribute names nothing Helios can place -- zone outages in
+its region become inconclusive), `inexact` (a plan reference linked every
+candidate -- the group is evaluated worst case), `pending_principals` (plan
+roles) and `sensitive_values` (Terraform's mask, used to redact).
 
 The distinction matters for the SMT encoding. `Contains` propagates failure
 downward (a subnet failure forces every contained EC2 instance to fail).
-`MemberOf` does *not* propagate -- it would over-constrain regional
-services like Lambda that are members of a subnet but survive subnet
-loss.
+`MemberOf` is mostly topology and does *not* propagate -- it would
+over-constrain regional services. Two are read: an ALB with no declared
+zones is down when all of its `subnets` are, and an in-VPC Lambda when all
+of its `subnet_ids` are down or have lost egress (any of them, when a plan
+could not say exactly which). A `Spread` group propagates by its
+`helios_models::spread_rule`, read from the attrs at solve time:
+`AnySurvivor` (down when every member is), `FailsIfAnyDown` (capacity 1 or
+placement unknown: down when any member is) or `Ignore`. `Egress` is read
+only by compute in the subnet (a subnet's own `down` never reads it). The
+edges a resource's `down` reads -- `Contains`, `Spread` and the two read
+`MemberOf`s -- must be acyclic (`Error::DependencyCycle`); a cycle that
+only an over-connected plan reference closes is dropped with a warning.
+
+A saved plan (`terraform show -json <planfile>`) is read from
+`planned_values`; an attribute unknown until apply is resolved through the
+`configuration` block's `references` (a specific instance, else the
+same `count.index` / `each.key`, else every instance).
 
 ### `helios-models`
 
@@ -97,9 +128,13 @@ Z3 4.16.0 binary for both Linux and Windows. No system Z3 install needed.
 
 ### `helios-cli`
 
-Five subcommands:
+Six subcommands:
 
-- `helios plan <tf-json-dir>` -- print resource and edge counts.
+- `helios plan <tf-json-dir>` -- print the source (`state` or `plan`) and
+  resource and edge counts.
+- `helios propose-fix <tf-json> --scenario <yaml>` -- simulate, then pipe
+  the chain and the scrubbed attrs of the failed resources to
+  `python -m helios_ai propose-fix`; prints the FixProposal JSON.
 - `helios simulate <tf-json> --scenario <yaml> [--json]` -- run the engine,
   print or emit the chain. Exits non-zero on any failure.
 - `helios explain` -- read `FailureChain` JSON on stdin, shell out to
@@ -140,7 +175,8 @@ keeps schema drift loud.
 Vite 5 + React 18 + TypeScript 5 + cytoscape 3.30. Single-page app. Loader
 is pure JSON validation. The Graph component is a `useEffect`-mounted
 cytoscape canvas with kind-keyed pastels, failed resources red, `Contains`
-edges thick + solid, `MemberOf` edges thin + dashed, breadthfirst layout.
+edges thick + solid, `MemberOf` edges thin + dashed, `Spread` edges medium +
+dotted, breadthfirst layout.
 
 The viewer is local-only in v0.1: file picker, paste-textarea, "Load
 sample" button. Workflow-artifact deep-linking via `?artifact=<url>` is

@@ -45,12 +45,17 @@ pub struct EdgeDoc {
 pub enum DepDoc {
     Contains(String),
     MemberOf(String),
+    Spread(String),
+    Egress(String),
 }
 
-/// Attribute names whose values must never leave the machine in an inspect document. The
-/// document is uploaded as a CI artifact and pasted into a viewer, and a real
-/// `terraform show -json` carries plaintext passwords and keys under names like these.
-const SENSITIVE_ATTR_FRAGMENTS: [&str; 8] = [
+/// Attribute names whose values must never leave the machine in an inspect document or a
+/// propose-fix request. The document is uploaded as a CI artifact and pasted into a viewer, and a
+/// real `terraform show -json` carries plaintext passwords and keys under names like these. The
+/// last three are redacted WHOLE because their values are free-form: a Lambda's
+/// `environment[0].variables` (`DATABASE_URL = "postgres://app:pw@..."`), an ECS task's
+/// `container_definitions` JSON, an instance's `user_data` / `user_data_base64` script.
+const SENSITIVE_ATTR_FRAGMENTS: [&str; 11] = [
     "password",
     "passwd",
     "secret",
@@ -59,6 +64,9 @@ const SENSITIVE_ATTR_FRAGMENTS: [&str; 8] = [
     "access_key",
     "credential",
     "api_key",
+    "environment",
+    "container_definitions",
+    "user_data",
 ];
 
 /// Placeholder written in place of a sensitive value.
@@ -89,8 +97,45 @@ pub fn scrub_sensitive_attrs(value: &serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// A resource's attrs as they may leave the machine: every path Terraform itself marked in
+/// `sensitive_values` redacted, then [`scrub_sensitive_attrs`] by name.
+pub fn scrub_resource(r: &helios_graph::Resource) -> serde_json::Value {
+    scrub_sensitive_attrs(&mask_sensitive(&r.attrs, &r.sensitive_values))
+}
+
+/// Redact every value `mask` (Terraform's `sensitive_values`, same shape as the values) marks
+/// `true`.
+fn mask_sensitive(value: &serde_json::Value, mask: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match (value, mask) {
+        (v, Value::Bool(true)) if !v.is_null() => Value::String(REDACTED.to_string()),
+        (Value::Object(map), Value::Object(marks)) => Value::Object(
+            map.iter()
+                .map(|(k, v)| {
+                    let masked = marks
+                        .get(k)
+                        .map_or_else(|| v.clone(), |m| mask_sensitive(v, m));
+                    (k.clone(), masked)
+                })
+                .collect(),
+        ),
+        (Value::Array(items), Value::Array(marks)) => Value::Array(
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    marks
+                        .get(i)
+                        .map_or_else(|| v.clone(), |m| mask_sensitive(v, m))
+                })
+                .collect(),
+        ),
+        (v, _) => v.clone(),
+    }
+}
+
 /// Build an [`InspectDoc`] from a graph and a freshly-simulated chain. Every node's attrs are
-/// passed through [`scrub_sensitive_attrs`] first.
+/// passed through [`scrub_resource`] first.
 pub fn build_inspect(graph: &ResourceGraph, chain: FailureChain) -> InspectDoc {
     let scenario = chain.scenario.clone();
 
@@ -101,7 +146,7 @@ pub fn build_inspect(graph: &ResourceGraph, chain: FailureChain) -> InspectDoc {
             NodeDoc {
                 id: r.id.clone(),
                 kind: format!("{:?}", r.kind),
-                attrs: scrub_sensitive_attrs(&r.attrs),
+                attrs: scrub_resource(r),
             }
         })
         .collect();
@@ -114,6 +159,8 @@ pub fn build_inspect(graph: &ResourceGraph, chain: FailureChain) -> InspectDoc {
             let dep = match e.weight() {
                 Dependency::Contains(via) => DepDoc::Contains((*via).to_string()),
                 Dependency::MemberOf(via) => DepDoc::MemberOf((*via).to_string()),
+                Dependency::Spread(via) => DepDoc::Spread((*via).to_string()),
+                Dependency::Egress(via) => DepDoc::Egress((*via).to_string()),
             };
             EdgeDoc { from, to, dep }
         })
@@ -149,6 +196,20 @@ mod tests {
             json,
             serde_json::json!({"kind": "MemberOf", "via": "subnets"})
         );
+
+        let dep = DepDoc::Spread("subnet_ids".into());
+        let json = serde_json::to_value(&dep).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"kind": "Spread", "via": "subnet_ids"})
+        );
+
+        let dep = DepDoc::Egress("nat_gateway_id".into());
+        let json = serde_json::to_value(&dep).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"kind": "Egress", "via": "nat_gateway_id"})
+        );
     }
 
     #[test]
@@ -183,6 +244,57 @@ mod tests {
             .iter()
             .any(|e| matches!(&e.dep, DepDoc::Contains(via) if via == "vpc_id"));
         assert!(has_contains, "expected at least one Contains(vpc_id) edge");
+    }
+
+    #[test]
+    fn spread_edges_reach_the_document_as_spread() {
+        let graph = from_json(include_str!(
+            "../../../fixtures/wave4-synthetic/terraform-show.json"
+        ))
+        .unwrap();
+        let chain = FailureChain {
+            scenario: "x".into(),
+            failures: vec![],
+        };
+        let doc = build_inspect(&graph, chain);
+        assert!(doc
+            .graph
+            .edges
+            .iter()
+            .any(|e| e.from == "aws_ecs_service.orders_api"
+                && e.dep == DepDoc::Spread("network_configuration.subnets".into())));
+    }
+
+    #[test]
+    fn terraform_marked_values_and_free_form_blobs_are_redacted() {
+        let json = r#"{"format_version":"1.0","values":{"root_module":{"resources":[
+          {"address":"aws_lambda_function.f","type":"aws_lambda_function",
+           "values":{"id":"f","function_name":"f",
+             "environment":[{"variables":{"DATABASE_URL":"postgres://app:fake-pw-2@db:5432/shop"}}],
+             "handler_config":"dsn=postgres://app:fake-pw-3@db"},
+           "sensitive_values":{"handler_config":true,"environment":[{"variables":true}]}},
+          {"address":"aws_lambda_function.g","type":"aws_lambda_function",
+           "values":{"id":"g","function_name":"g",
+             "environment":[{"variables":{"DATABASE_URL":"postgres://app:fake-pw-6@db:5432/shop"}}]}},
+          {"address":"aws_instance.i","type":"aws_instance",
+           "values":{"id":"i","availability_zone":"us-east-1a",
+             "user_data":"export PGPASSWORD=hunter4","user_data_base64":"aHVudGVyNQ=="}}]}}}"#;
+        let graph = from_json(json).unwrap();
+        let chain = FailureChain {
+            scenario: "x".into(),
+            failures: vec![],
+        };
+        let doc = serde_json::to_string(&build_inspect(&graph, chain)).unwrap();
+        for leak in [
+            "fake-pw-2",
+            "fake-pw-3",
+            "hunter4",
+            "aHVudGVyNQ",
+            "fake-pw-6",
+        ] {
+            assert!(!doc.contains(leak), "{leak} leaked: {doc}");
+        }
+        assert!(doc.contains("\"function_name\":\"f\""));
     }
 
     #[test]

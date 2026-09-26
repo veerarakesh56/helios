@@ -16,10 +16,7 @@ fn loads_eight_resource_kinds() {
         "expected 9 resources (vpc, 2 subnets, ec2, alb, rds, elasticache, lambda, s3)"
     );
 
-    let kinds: HashSet<ResourceKind> = graph
-        .node_indices()
-        .map(|i| graph[i].kind.clone())
-        .collect();
+    let kinds: HashSet<ResourceKind> = graph.node_indices().map(|i| graph[i].kind).collect();
     let expected: HashSet<ResourceKind> = [
         ResourceKind::Vpc,
         ResourceKind::Subnet,

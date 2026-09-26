@@ -1,4 +1,4 @@
-//! Scenario = a declarative failure to simulate. Five kinds are supported.
+//! Scenario = a declarative failure to simulate. Six kinds are supported.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -27,11 +27,17 @@ pub enum ScenarioKind {
     IamRevocation { principal_arn: String },
     /// A multi-AZ RDS's failover window stretches past SLO — during that
     /// window the DB is unreachable. Modeled as forcing that specific
-    /// resource down; dependents propagate via Contains edges.
+    /// resource down; dependents propagate via Contains/Spread edges.
+    /// Targets an `aws_db_instance`, an `aws_rds_cluster` (the whole cluster
+    /// is down for the window) or an `aws_rds_cluster_instance` (writer loss).
     SlowRdsFailover { db_id: String },
-    /// A single NAT gateway dies. Modeled via the subnet it sits in: the
-    /// subnet loses egress, which knocks out every instance inside it.
+    /// A single NAT gateway dies. `subnet_id` names either an `aws_nat_gateway`
+    /// (every subnet routing 0.0.0.0/0 through it loses egress) or a subnet
+    /// (that subnet loses egress). Everything inside follows.
     SingleNatDeath { subnet_id: String },
+    /// Any one resource is lost (a cache, a queue, a node group): forced down
+    /// exactly like `slow-rds-failover`, without calling it a database.
+    ResourceLoss { resource_id: String },
 }
 
 #[derive(Debug, Error)]
@@ -120,6 +126,18 @@ mod tests {
             s.kind,
             ScenarioKind::SingleNatDeath {
                 subnet_id: "aws_subnet.public_a".into()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_resource_loss() {
+        let yaml = "name: cache-loss\nkind:\n  type: resource-loss\n  resource_id: aws_elasticache_replication_group.redis\n";
+        let s: Scenario = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(
+            s.kind,
+            ScenarioKind::ResourceLoss {
+                resource_id: "aws_elasticache_replication_group.redis".into()
             }
         );
     }

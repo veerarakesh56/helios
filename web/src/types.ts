@@ -26,7 +26,7 @@ export interface EdgeDoc {
 }
 
 export interface DepDoc {
-  kind: "Contains" | "MemberOf";
+  kind: "Contains" | "MemberOf" | "Spread" | "Egress";
   via: string;
 }
 

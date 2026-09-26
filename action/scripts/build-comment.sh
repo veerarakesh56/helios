@@ -15,7 +15,7 @@ artifact_url="$SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID#artifacts"
   echo "<!-- helios-action -->"
   echo "## Helios PR analysis"
   echo
-  echo "Ran \`helios inspect\` over $(ls "$ARTIFACT_DIR"/*.json 2>/dev/null | wc -l | tr -d ' ') scenario(s)."
+  echo "Ran \`helios inspect\` over $(ls "$ARTIFACT_DIR"/*.json "$ARTIFACT_DIR"/*.inconclusive.txt 2>/dev/null | wc -l | tr -d ' ') scenario(s)."
   echo "Inspect JSON artifacts: [\`$ARTIFACT_NAME\`]($artifact_url) (download and drop into the [web viewer](../../tree/main/web))."
   echo
 } > "$COMMENT_PATH"
@@ -54,6 +54,20 @@ for inspect_json in "$ARTIFACT_DIR"/*.json; do
       cat "$verify_txt"
       echo '```'
     fi
+    echo
+    echo "</details>"
+    echo
+  } >> "$COMMENT_PATH"
+done
+for inconclusive in "$ARTIFACT_DIR"/*.inconclusive.txt; do
+  stem="$(basename "$inconclusive" .inconclusive.txt)"
+  {
+    echo "<details open>"
+    echo "<summary><strong>$stem</strong> — ⚠️ inconclusive: Helios cannot evaluate this scenario (not a pass)</summary>"
+    echo
+    echo '```'
+    cat "$inconclusive"
+    echo '```'
     echo
     echo "</details>"
     echo

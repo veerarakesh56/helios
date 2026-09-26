@@ -65,11 +65,11 @@ class NodeDoc(BaseModel):
 
 
 class DepDoc(BaseModel):
-    """Tagged dependency edge weight: kind ∈ {Contains, MemberOf}, via = attr name."""
+    """Tagged dependency edge weight: kind ∈ {Contains, MemberOf, Spread, Egress}, via = attr."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["Contains", "MemberOf"]
+    kind: Literal["Contains", "MemberOf", "Spread", "Egress"]
     via: str
 
 

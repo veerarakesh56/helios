@@ -4,14 +4,18 @@
 #   - if $FIXES_DIR/<stem>.json exists, run `helios verify` and capture
 #     a per-scenario summary line into $ARTIFACT_DIR/<stem>.verify.txt
 #
-# A scenario FAILS when its chain has failures and no fix is committed, or when
-# `helios verify` exits non-zero. Failed stems are written one per line to
+# A scenario FAILS when its chain has failures and no fix is committed, when
+# `helios verify` exits non-zero, or when it is INCONCLUSIVE (helios exits 3: it
+# cannot be evaluated, e.g. an iam-revocation on a plan whose roles are unknown;
+# the message goes to $ARTIFACT_DIR/<stem>.inconclusive.txt, never read as a pass). Failed stems are written one per line to
 # $GATE_FILE (empty file = all passed); the action's last step gates on it.
 #
 # Inputs (env): HELIOS_BIN, SCENARIOS_GLOB, FIXES_DIR, TERRAFORM_JSON, ARTIFACT_DIR, GATE_FILE
 # Output (GHA step): artifact-dir = $ARTIFACT_DIR
 set -euo pipefail
 
+# Fresh each run: a second invocation in the same job must not report the first one's scenarios.
+rm -rf "$ARTIFACT_DIR"
 mkdir -p "$ARTIFACT_DIR"
 : > "$GATE_FILE"
 
@@ -30,7 +34,24 @@ for scenario in "${matches[@]}"; do
   echo "::group::scenario $stem"
 
   inspect_out="$ARTIFACT_DIR/$stem.json"
-  if ! "$HELIOS_BIN" inspect "$TERRAFORM_JSON" --scenario "$scenario" > "$inspect_out"; then
+  set +e
+  "$HELIOS_BIN" inspect "$TERRAFORM_JSON" --scenario "$scenario" > "$inspect_out" \
+    2> "$ARTIFACT_DIR/$stem.stderr.txt"
+  rc=$?
+  set -e
+  cat "$ARTIFACT_DIR/$stem.stderr.txt" >&2
+  if [[ $rc -eq 3 ]]; then
+    rm -f "$inspect_out"
+    # Only helios's verdict line: graph-build warnings also say INCONCLUSIVE.
+    grep -h '^helios: INCONCLUSIVE' "$ARTIFACT_DIR/$stem.stderr.txt" > "$ARTIFACT_DIR/$stem.inconclusive.txt" || true
+    rm -f "$ARTIFACT_DIR/$stem.stderr.txt"
+    echo "::warning::helios: $stem is INCONCLUSIVE (not a pass)"
+    echo "$stem" >> "$GATE_FILE"
+    echo "::endgroup::"
+    continue
+  fi
+  rm -f "$ARTIFACT_DIR/$stem.stderr.txt"
+  if [[ $rc -ne 0 ]]; then
     echo "::error::helios inspect failed for $stem"
     exit 1
   fi

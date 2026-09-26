@@ -42,14 +42,40 @@ def test_inspect_doc_round_trips_real_rust_output() -> None:
     assert len(doc.graph.edges) > 0
     assert len(doc.chain.failures) > 0
 
-    # Edge.dep.kind is one of the two known variants.
+    # Edge.dep.kind is one of the known variants.
     for e in doc.graph.edges:
-        assert e.dep.kind in ("Contains", "MemberOf")
+        assert e.dep.kind in ("Contains", "MemberOf", "Spread", "Egress")
         assert e.dep.via  # non-empty attr name
 
     # Round-trip: dump → reload → equal. `by_alias=True` re-emits `from`.
     redumped = doc.model_dump(by_alias=True)
     assert redumped == raw
+
+
+def test_dep_doc_accepts_spread_and_rejects_unknown_kinds() -> None:
+    from pydantic import ValidationError
+
+    from helios_ai.models import DepDoc
+
+    assert DepDoc.model_validate({"kind": "Spread", "via": "subnet_ids"}).kind == "Spread"
+    assert DepDoc.model_validate({"kind": "Egress", "via": "nat_gateway_id"}).kind == "Egress"
+    with pytest.raises(ValidationError):
+        DepDoc.model_validate({"kind": "Nearby", "via": "x"})
+
+
+def test_glossary_covers_spread_rules_and_resource_loss() -> None:
+    from helios_ai.glossary import AVAILABILITY_MODEL_GLOSSARY as g
+
+    for term in (
+        "Spread",
+        "Egress",
+        "AnySurvivor",
+        "FailsIfAnyDown",
+        "resource-loss",
+        "aws_eks_node_group",
+        "Inconclusive",
+    ):
+        assert term in g, term
 
 
 def test_glossary_mentions_every_model_variant() -> None:

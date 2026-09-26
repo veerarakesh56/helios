@@ -183,3 +183,22 @@ jobs:
         run: |
           echo "fail-on=failures outcome: ${{ steps.helios-gate.outcome }}"
           test "${{ steps.helios-gate.outcome }}" = failure
+
+      - name: Run helios action on an inconclusive scenario (must fail, must say so)
+        id: helios-inconclusive
+        continue-on-error: true
+        uses: ./action
+        with:
+          github-token: ${{ github.token }}
+          terraform-json: fixtures/iam-inconclusive/plan.json
+          scenarios-glob: fixtures/iam-inconclusive/*.yaml
+          fail-on: failures
+          artifact-name: helios-inspect-inconclusive
+
+      - name: Assert the inconclusive scenario is reported, not passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.helios-inconclusive.outcome }}" = failure
+          grep -q 'inconclusive' "${{ runner.temp }}/helios-comment.md"
+          grep -q 'INCONCLUSIVE' "${{ runner.temp }}/helios-comment.md"

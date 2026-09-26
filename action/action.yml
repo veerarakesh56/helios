@@ -39,7 +39,8 @@ inputs:
     description: >
       `never` (default) only reports. `failures` fails the step, after the
       comment and artifacts are posted, when any scenario failed: its chain has
-      failures and no fix is committed, or `helios verify` exits non-zero.
+      failures and no fix is committed, `helios verify` exits non-zero, or it is
+      inconclusive (helios exits 3: it cannot be evaluated, never a pass).
     required: false
     default: never
 

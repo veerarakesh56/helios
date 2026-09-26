@@ -1,7 +1,9 @@
-//! Parses `terraform show -json` output into a typed resource graph.
+//! Parses `terraform show -json` output — of a state, or of a saved plan — into a typed resource
+//! graph.
 //!
 //! The public entry point is [`load`]. All other items in this module are building blocks.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 mod error;
@@ -9,13 +11,39 @@ mod resource;
 mod tfjson;
 
 pub use error::Error;
-pub use resource::{Dependency, Resource, ResourceId, ResourceKind};
+pub use resource::{
+    Dependency, PendingPrincipal, Resource, ResourceId, ResourceKind, PRINCIPAL_ATTRS,
+};
 
 /// A directed graph of typed AWS resources with dependency edges.
 pub type ResourceGraph = petgraph::graph::DiGraph<Resource, Dependency>;
 
+/// Which document the graph was read from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// `terraform show -json` of a state: every attribute known.
+    State,
+    /// `terraform show -json <planfile>`: attributes unknown until apply are absent, and edges
+    /// fall back to the configuration's references.
+    Plan,
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Source::State => "state",
+            Source::Plan => "plan",
+        })
+    }
+}
+
 /// Load a Terraform JSON file (or a directory containing `terraform-show.json`) and build the graph.
 pub fn load<P: AsRef<Path>>(path: P) -> Result<ResourceGraph, Error> {
+    load_with_source(path).map(|(graph, _)| graph)
+}
+
+/// [`load`], also saying whether the document was a state or a plan.
+pub fn load_with_source<P: AsRef<Path>>(path: P) -> Result<(ResourceGraph, Source), Error> {
     let path = path.as_ref();
     let json_path = if path.is_dir() {
         path.join("terraform-show.json")
@@ -26,11 +54,29 @@ pub fn load<P: AsRef<Path>>(path: P) -> Result<ResourceGraph, Error> {
         path: json_path.clone(),
         source: e,
     })?;
-    from_json(&raw)
+    from_json_with_source(&raw)
 }
 
 /// Parse a raw Terraform JSON string into a resource graph.
 pub fn from_json(raw: &str) -> Result<ResourceGraph, Error> {
+    from_json_with_source(raw).map(|(graph, _)| graph)
+}
+
+/// [`from_json`], also saying whether the document was a state or a plan.
+pub fn from_json_with_source(raw: &str) -> Result<(ResourceGraph, Source), Error> {
     let parsed: tfjson::TerraformShow = serde_json::from_str(raw)?;
-    resource::build_graph(parsed.values.root_module)
+    let (values, source) = match (parsed.values, parsed.planned_values) {
+        (Some(v), _) => (v, Source::State),
+        (None, Some(v)) => (v, Source::Plan),
+        (None, None) => return Err(Error::NotTerraformJson),
+    };
+    let mut config = HashMap::new();
+    let mut regions = HashMap::new();
+    if let Some(c) = parsed.configuration {
+        let providers = c.provider_regions();
+        c.root_module
+            .expressions("", &providers, &mut config, &mut regions);
+    }
+    let graph = resource::build_graph(values.root_module.flatten(), &config, &regions)?;
+    Ok((graph, source))
 }

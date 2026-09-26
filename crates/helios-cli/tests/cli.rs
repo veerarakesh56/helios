@@ -175,6 +175,68 @@ fn propose_fix_subcommand_emits_valid_fix_json_via_mock() {
 }
 
 #[test]
+fn helios_propose_fix_simulates_and_prints_a_fix_proposal_via_mock() {
+    let root = repo_root();
+    let Some(python) = venv_python_or_skip(&root) else {
+        return;
+    };
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args([
+            "propose-fix",
+            "fixtures/three-tier-webapp",
+            "--scenario",
+            "fixtures/scenarios/az-outage.yaml",
+        ])
+        .env("HELIOS_AI_PYTHON", &python)
+        .env("HELIOS_AI_MOCK", "1")
+        .env_remove("ANTHROPIC_API_KEY")
+        .output()
+        .expect("spawn helios propose-fix");
+    assert!(
+        output.status.success(),
+        "helios propose-fix failed: {}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout not a FixProposal: {e}\nstdout: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    });
+    // The mock targets the chain's first failure, so this proves the simulated chain reached it.
+    assert_eq!(parsed["scenario_name"], "lose-us-east-1a");
+    assert_eq!(
+        parsed["edits"][0]["resource_id"],
+        "aws_elasticache_cluster.cache"
+    );
+}
+
+#[test]
+fn helios_propose_fix_with_nothing_failing_prints_nothing_and_calls_no_model() {
+    let root = repo_root();
+    let tmp = tempfile::tempdir().unwrap();
+    let scenario = tmp.path().join("c.yaml");
+    std::fs::write(
+        &scenario,
+        "name: lose-1c\nkind:\n  type: az-outage\n  az: us-east-1c\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args(["propose-fix", "fixtures/three-tier-webapp", "--scenario"])
+        .arg(&scenario)
+        // A python that does not exist: reaching it would fail the command.
+        .env("HELIOS_AI_PYTHON", tmp.path().join("no-python"))
+        .output()
+        .expect("spawn helios propose-fix");
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("nothing to fix"));
+}
+
+#[test]
 fn verify_with_resolving_fix_reports_resolved_section() {
     let root = repo_root();
     let tmp = tempfile::tempdir().unwrap();
@@ -294,6 +356,102 @@ fn inspect_emits_combined_graph_and_chain_json() {
     assert!(nodes[0]["kind"].is_string());
     assert!(edges[0]["dep"]["kind"].is_string());
     assert!(edges[0]["dep"]["via"].is_string());
+}
+
+#[test]
+fn plan_says_whether_it_read_a_state_or_a_plan() {
+    let root = repo_root();
+    for (input, source) in [
+        ("fixtures/three-tier-webapp", "source: state"),
+        ("fixtures/wave4-synthetic/plan.json", "source: plan"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+            .current_dir(&root)
+            .args(["plan", input])
+            .output()
+            .expect("failed to spawn helios plan");
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.starts_with(source), "{input}: {stdout}");
+    }
+}
+
+#[test]
+fn an_inconclusive_scenario_exits_3_with_nothing_on_stdout() {
+    let root = repo_root();
+    for cmd in ["simulate", "inspect"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+            .current_dir(&root)
+            .args([
+                cmd,
+                "fixtures/iam-inconclusive/plan.json",
+                "--scenario",
+                "fixtures/iam-inconclusive/revoke-worker.yaml",
+            ])
+            .output()
+            .expect("spawn helios");
+        assert_eq!(output.status.code(), Some(3), "{cmd}");
+        assert!(output.stdout.is_empty(), "{cmd}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("INCONCLUSIVE (not a pass)"));
+    }
+}
+
+#[test]
+fn warnings_are_plain_text_and_a_subnet_placed_instance_is_not_called_unplaceable() {
+    // stderr is a pipe here, as in CI and the Action: no ANSI colour codes. p1b's instances have
+    // no zone of their own but a subnet with one -- they are placed, so no "ZONE UNKNOWN" line.
+    let root = repo_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args(["plan", "fixtures/edge-cases/p1b.json"])
+        .output()
+        .expect("spawn helios plan");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("WARN"), "expected warnings: {stderr}");
+    assert!(!stderr.contains('\u{1b}'), "ANSI escapes in: {stderr}");
+    assert!(!stderr.contains("AVAILABILITY ZONE UNKNOWN"), "{stderr}");
+}
+
+#[test]
+fn a_warning_is_printed_once_however_often_the_attribute_is_resolved() {
+    let root = repo_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args(["plan", "fixtures/edge-cases/vpc-plan-foreach.json"])
+        .output()
+        .expect("spawn helios plan");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Drop the timestamp; the rest of each line must be unique.
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("WARN"))
+        .map(|l| l.split_once(' ').map_or(l, |(_, rest)| rest))
+        .collect();
+    let unique: std::collections::BTreeSet<&str> = lines.iter().copied().collect();
+    assert!(lines.len() > 1, "{stderr}");
+    assert_eq!(lines.len(), unique.len(), "repeated warnings:\n{stderr}");
+}
+
+#[test]
+fn unsupported_types_are_summarised_in_one_line() {
+    // wave4-synthetic has an aws_internet_gateway and an aws_sns_topic Helios does not model.
+    let root = repo_root();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args(["plan", "fixtures/wave4-synthetic/terraform-show.json"])
+        .output()
+        .expect("spawn helios plan");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let summaries: Vec<&str> = stderr.lines().filter(|l| l.contains("skipped")).collect();
+    assert_eq!(summaries.len(), 1, "{stderr}");
+    assert!(
+        summaries[0].contains(
+            "skipped 2 resources of 2 unsupported types (not in the graph, not assumed \
+             healthy): aws_internet_gateway (1), aws_sns_topic (1)"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("skipping unsupported"), "{stderr}");
 }
 
 #[test]

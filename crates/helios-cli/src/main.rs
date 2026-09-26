@@ -19,7 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse a Terraform JSON input and print the resource graph.
+    /// Parse a Terraform JSON input (`terraform show -json` of a state or of a saved plan) and
+    /// summarise the resource graph.
     Plan {
         /// Path to a directory containing terraform-show.json, or to the JSON file itself.
         input: PathBuf,
@@ -49,6 +50,13 @@ enum Command {
     },
     /// Narrate a FailureChain (read as JSON on stdin) via the helios-ai Python shell.
     Explain,
+    /// Simulate, then ask helios-ai for a FixProposal (JSON on stdout, ready for `verify --fix`).
+    /// Only the FAILED resources' attributes are sent, with sensitive values redacted.
+    ProposeFix {
+        input: PathBuf,
+        #[arg(long)]
+        scenario: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -57,8 +65,12 @@ fn main() -> Result<()> {
     // stderr, NOT stdout. `simulate --json` and `inspect` write a document to stdout that the
     // GitHub Action redirects to a file and parses with `jq`; a warning on stdout corrupts it, so
     // one skipped resource would break the PR comment on any real repository.
+    // No colour codes unless a person is watching: CI logs, the Action's captured stderr and
+    // `2> file` must stay plain text.
+    use std::io::IsTerminal;
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(tracing_subscriber::EnvFilter::new(&cli.log_level))
         .init();
 
@@ -76,11 +88,13 @@ fn main() -> Result<()> {
         } => cmd_verify(&input, &scenario, &fix),
         Command::Inspect { input, scenario } => cmd_inspect(&input, &scenario),
         Command::Explain => cmd_explain(),
+        Command::ProposeFix { input, scenario } => cmd_propose_fix(&input, &scenario),
     }
 }
 
 fn cmd_plan(input: &std::path::Path) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let (graph, source) = helios_graph::load_with_source(input)?;
+    println!("source: {source}");
     println!(
         "loaded {} resources, {} dependency edges",
         graph.node_count(),
@@ -93,8 +107,7 @@ fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool)
     let graph = helios_graph::load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
-    let chain =
-        helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
+    let chain = simulate(&graph, &scenario)?;
     if json {
         serde_json::to_writer_pretty(std::io::stdout().lock(), &chain)?;
         println!();
@@ -116,8 +129,12 @@ fn cmd_verify(
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let fix = helios_engine::fix::load(fix).map_err(|e| anyhow::anyhow!("loading fix: {e}"))?;
-    let report = helios_engine::verify(&graph, &scenario, &fix)
-        .map_err(|e| anyhow::anyhow!("verify: {e}"))?;
+    let report = helios_engine::verify(&graph, &scenario, &fix).map_err(|e| {
+        if let helios_engine::VerifyError::Simulate(inner) = &e {
+            exit_if_inconclusive(inner);
+        }
+        anyhow::anyhow!("verify: {e}")
+    })?;
 
     println!("Scenario: {}", report.pre_fix.scenario);
     println!("Pre-fix failures:  {}", report.pre_fix.failures.len());
@@ -151,12 +168,33 @@ fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()
     let graph = helios_graph::load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
-    let chain =
-        helios_engine::simulate(&graph, &scenario).map_err(|e| anyhow::anyhow!("simulate: {e}"))?;
+    let chain = simulate(&graph, &scenario)?;
     let doc = helios_engine::build_inspect(&graph, chain);
     serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
     println!();
     Ok(())
+}
+
+/// Exit code for a scenario Helios cannot evaluate: distinct from 0 (resilient) and 1 (failures,
+/// or an error), so a pipeline cannot read "cannot say" as either.
+const EXIT_INCONCLUSIVE: i32 = 3;
+
+/// [`helios_engine::simulate`], exiting [`EXIT_INCONCLUSIVE`] on an inconclusive scenario.
+fn simulate(
+    graph: &helios_graph::ResourceGraph,
+    scenario: &helios_engine::Scenario,
+) -> Result<helios_engine::FailureChain> {
+    helios_engine::simulate(graph, scenario).map_err(|e| {
+        exit_if_inconclusive(&e);
+        anyhow::anyhow!("simulate: {e}")
+    })
+}
+
+fn exit_if_inconclusive(e: &helios_engine::SimulateError) {
+    if matches!(e, helios_engine::SimulateError::Inconclusive(_)) {
+        eprintln!("helios: {e}");
+        std::process::exit(EXIT_INCONCLUSIVE);
+    }
 }
 
 /// Narrate a FailureChain read as JSON on stdin, via `python -m helios_ai explain`.
@@ -168,6 +206,38 @@ fn cmd_explain() -> Result<()> {
         .read_to_string(&mut input)
         .map_err(|e| anyhow::anyhow!("reading FailureChain JSON from stdin: {e}"))?;
     run_helios_ai("explain", &input)
+}
+
+/// Simulate, then pipe `{chain, attrs_snapshot}` to `python -m helios_ai propose-fix`, whose
+/// FixProposal JSON goes straight to stdout.
+fn cmd_propose_fix(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
+    let graph = helios_graph::load(input)?;
+    let scenario = helios_engine::scenario::load(scenario)
+        .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
+    let chain = simulate(&graph, &scenario)?;
+    if chain.is_safe() {
+        // Nothing on stdout: a pipeline into `verify --fix` must not receive a proposal for nothing.
+        eprintln!("no failures under {} — nothing to fix", chain.scenario);
+        return Ok(());
+    }
+    run_helios_ai("propose-fix", &fix_request(&graph, &chain).to_string())
+}
+
+/// The propose-fix request: the chain, and the scrubbed attrs of the resources in it — not the
+/// whole graph, which is more than the model needs and more than should leave the machine.
+fn fix_request(
+    graph: &helios_graph::ResourceGraph,
+    chain: &helios_engine::FailureChain,
+) -> serde_json::Value {
+    let attrs_snapshot: serde_json::Map<String, serde_json::Value> = chain
+        .failures
+        .iter()
+        .filter_map(|f| {
+            let idx = graph.node_indices().find(|i| graph[*i].id == f.id)?;
+            Some((f.id.clone(), helios_engine::scrub_resource(&graph[idx])))
+        })
+        .collect();
+    serde_json::json!({ "chain": chain, "attrs_snapshot": attrs_snapshot })
 }
 
 /// The interpreter that has `helios_ai` installed: `HELIOS_AI_PYTHON` if set, else the repo venv
@@ -204,7 +274,8 @@ fn run_helios_ai(sub: &str, stdin: &str) -> Result<()> {
         .spawn()
         .map_err(|e| {
             anyhow::anyhow!(
-                "spawning `{shown} -m helios_ai {sub}` — is helios-ai installed? Set HELIOS_AI_PYTHON                  or create helios-ai/.venv ({e})"
+                "spawning `{shown} -m helios_ai {sub}` — is helios-ai installed? Set HELIOS_AI_PYTHON \
+                 or create helios-ai/.venv ({e})"
             )
         })?;
 
@@ -220,4 +291,50 @@ fn run_helios_ai(sub: &str, stdin: &str) -> Result<()> {
         anyhow::bail!("`{shown} -m helios_ai {sub}` failed: {status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fix_request_carries_only_the_failed_resources_scrubbed() {
+        let graph = helios_graph::from_json(
+            r#"{"format_version":"1.0","values":{"root_module":{"resources":[
+              {"address":"aws_db_instance.db","type":"aws_db_instance",
+               "values":{"id":"db","availability_zone":"us-east-1a","password":"hunter2",
+                 "note":"postgres://app:fake-pw-3@db"},
+               "sensitive_values":{"note":true}},
+              {"address":"aws_s3_bucket.b","type":"aws_s3_bucket","values":{"id":"b"}}]}}}"#,
+        )
+        .unwrap();
+        let chain = helios_engine::FailureChain {
+            scenario: "s".into(),
+            failures: vec![helios_engine::FailedResource {
+                id: "aws_db_instance.db".into(),
+                kind: "DbInstance".into(),
+                reason: "r".into(),
+            }],
+        };
+        let req = fix_request(&graph, &chain);
+        let snapshot = req["attrs_snapshot"].as_object().unwrap();
+        assert_eq!(
+            snapshot.keys().collect::<Vec<_>>(),
+            vec!["aws_db_instance.db"]
+        );
+        assert_eq!(
+            snapshot["aws_db_instance.db"]["password"],
+            helios_engine::REDACTED
+        );
+        assert_eq!(
+            snapshot["aws_db_instance.db"]["availability_zone"],
+            "us-east-1a"
+        );
+        assert_eq!(
+            snapshot["aws_db_instance.db"]["note"],
+            helios_engine::REDACTED
+        );
+        assert!(!req.to_string().contains("hunter2") && !req.to_string().contains("fake-pw-3"));
+        assert_eq!(req["chain"]["scenario"], "s");
+    }
 }

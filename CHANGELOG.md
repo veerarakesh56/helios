@@ -16,6 +16,51 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `scripts/check_publishable.py` (secret / state-file / public-IP / account-id guard, run in CI) and
   `scripts/scrub_tfjson.py` (reduces a `terraform show -json` document to the topology Helios reads).
 - CI `msrv` job: `cargo check` on the declared minimum Rust.
+- **Ten new resource kinds**: `aws_rds_cluster`, `aws_rds_cluster_instance`,
+  `aws_elasticache_replication_group`, `aws_ecs_cluster`, `aws_ecs_service`, `aws_eks_cluster`,
+  `aws_eks_node_group`, `aws_sqs_queue`, `aws_vpc_endpoint`, `aws_nat_gateway`. Nine more types are
+  read only to link resources and never become nodes: `aws_db_subnet_group`,
+  `aws_elasticache_subnet_group`, `aws_lambda_event_source_mapping`, `aws_route_table`, `aws_route`,
+  `aws_route_table_association`, `aws_main_route_table_association`, `aws_default_route_table`
+  and `aws_iam_role`.
+- **`Dependency::Spread(via)`, a placement group.** Every Spread edge out of a resource with the
+  same `via` is one group: an ECS service's or node group's subnets, the subnets of an Aurora
+  instance's or Redis group's subnet group, an interface endpoint's subnets, an Aurora cluster's
+  instances. `helios_models::spread_rule` says how the group fails: `AnySurvivor` (down only when
+  every member is), `FailsIfAnyDown` (capacity 1 or placement unknown until apply: down when any
+  member is) or `Ignore`. The rule is read from the attributes **at solve time**, so a `set_attr`
+  fix such as `desired_count = 2`, `scaling_config[0].desired_size = 2` or
+  `automatic_failover_enabled = true` re-verifies. Mirrored in `inspect` (`DepDoc::Spread`), the
+  Pydantic and TypeScript types, and the viewer (medium, dotted edges).
+- **`terraform show -json <planfile>`.** Helios reads `planned_values` when there is no `values`,
+  and an attribute unknown until apply is resolved through the `configuration` block's
+  `references`: a reference to a specific instance names only it; otherwise `count.index` /
+  `each.key` pairs the same index or key; otherwise every instance (with a warning when the
+  attribute holds one value). Module calls are followed. References through `local.*`, `var.*`,
+  module outputs and `dynamic` blocks are not, and say so in a warning. `helios plan` prints
+  `source: state` or `source: plan`; a document with neither key is `Error::NotTerraformJson`.
+- **NAT gateways, as egress.** `Dependency::Egress`: a subnet points at the NAT gateway its route
+  table's default route (`0.0.0.0/0`, inline or `aws_route`; with no association, the VPC's main
+  route table) goes through. Losing the NAT, or its zone, fails the COMPUTE in such subnets
+  (instances, ECS services, EKS node groups, and an in-VPC Lambda once all its subnets have lost
+  egress) — not the subnets, and not a database, cache or endpoint in them. `single-nat-death`
+  accepts an `aws_nat_gateway` address. Mirrored in `inspect`, Pydantic, TypeScript and the viewer.
+- New scenario kind **`resource-loss { resource_id }`**: forces any one resource down (as
+  `slow-rds-failover` does) without calling a cache or a queue a database. `slow-rds-failover` also
+  targets an `aws_rds_cluster` (the whole cluster is down for the window) or an
+  `aws_rds_cluster_instance` (writer loss). Reasons say which.
+- `iam-revocation` also reads `node_role_arn` (EKS node groups); an EKS cluster's revoked role takes
+  its node group with it.
+- **`helios propose-fix <tf-json> --scenario <yaml>`**: simulates, then pipes the chain and the
+  **scrubbed attributes of the failed resources only** to `python -m helios_ai propose-fix` and
+  prints the FixProposal. Nothing failing: nothing printed, no model call.
+- `fixtures/wave4-synthetic/`: a hand-written state of WARDEN's Wave 4 topology (ap-south-2) and a
+  plan derived from it the way `terraform show -json <planfile>` renders it — including the real
+  config's gap: the Lambdas' `dynamic "vpc_config"` has no references — with exact-failure-set
+  tests, plus NAT, plan-reference, resolver and "not a pass" tests.
+- **Inconclusive is a result.** `SimulateError::Inconclusive`; the CLI exits **3** with nothing on
+  stdout; the Action records `<stem>.inconclusive.txt`, shows it in the PR comment and fails the
+  `fail-on: failures` gate. See the ⛔ entries under Fixed for what triggers it.
 
 ### Fixed
 
@@ -29,6 +74,121 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `glossary.py` (the prompt's model reference) called S3 global and RDS regional; the code models S3
   as Regional and RDS as SingleAz / MultiAz by `multi_az`.
 - `helios_ai.__version__` said 0.0.1; it now reads the installed package version.
+- **Real `aws_lb` state never failed a zone outage.** It has `subnets` but no
+  `availability_zones`, so the ALB was modelled as surviving every zone loss. A multi-AZ resource
+  with no declared zones is now down when every subnet it is a member of is down. (The three-tier
+  fixture declares its zones, so its outputs are unchanged.)
+- **List-shaped blocks were read as objects.** Real state stores `vpc_config`,
+  `network_configuration` and `scaling_config` as one-element lists; an in-VPC Lambda had no
+  edges. The resolver walks objects and lists alike.
+- **Edge targets were matched on `id` alone, of any type.** They are now matched on `id`, `arn`
+  or `name`, and only against the types the edge allows — WARDEN's DB subnet group is named
+  exactly like its Aurora cluster.
+- ⛔ **A resource whose zone could not be modelled answered zone outages anyway.** A subnet, database
+  or cache without an `availability_zone` was placed in the region's `a` zone — a guess, so a `b`
+  outage "passed". And a zone-deciding attribute that names nothing in the graph (an ECS service
+  or node group in a data-source subnet, an Aurora instance with no zone and no subnet group, an
+  ALB whose `subnets` are external) left the resource with no placement at all: Regional, so it
+  survived every zone outage — exit 0, "resilient". Both now make an `az-outage` in that region
+  **inconclusive**. An instance with no zone of its own is placed by its subnet.
+- ⛔ **Linking every candidate made a group look SAFER, not worse.** When a plan reference could
+  not be resolved exactly, every instance was linked "worst case" — but for a group that survives
+  while any member does (an ECS service with `desired_count = 2`, an ALB's subnets) more members is
+  the BEST case. Such groups are now evaluated as lost when any member is, and say "placement
+  could not be resolved exactly from the plan".
+- ⛔ **A NAT failure failed everything in the subnet** — Redis, Aurora instances, endpoints, internal
+  ALBs — though only egress is lost. Now `Egress`, and only compute follows (see Added).
+- `count.index` pairing inside a counted/`for_each` module counted the referencing block across
+  every module instance, so it never matched and over-linked (an instance in 1b failed a 1a
+  outage). It now counts within the module instance.
+- A subnet associated with a route table Helios cannot see fell back to the VPC's main route table
+  and got a NAT edge that does not exist. The main table is used only when there is no
+  association. A cycle that only an over-connected plan reference closes is dropped with a warning
+  instead of aborting; a cycle of exact edges is still `Error::DependencyCycle`.
+- The ALB zone fallback reads its `MemberOf("subnets")` edges (and a Lambda its `subnet_ids`, for
+  egress), but the acyclicity check skipped `MemberOf`: those two are now checked.
+- `propose-fix` and `inspect` redacted by attribute name only, so a Lambda's
+  `environment[0].variables` (`DATABASE_URL = "postgres://app:pw@…"`), `user_data`,
+  `user_data_base64` and `container_definitions` went out whole. Those are now redacted wholesale,
+  and every path Terraform itself marks in `sensitive_values` is redacted too.
+- Resources of unsupported types are reported in ONE warning per graph ("skipped N resources of M
+  unsupported types: type (count), ..."), not one line each.
+- **Unresolvable associations no longer make everything inconclusive.** A subnet no resolvable
+  association names gets the NAT set that every table it could be in agrees on (the tables of the
+  unresolvable associations, plus the main table when there are fewer of those than such
+  subnets); only when they disagree is its egress unknown — and only a subnet with compute in it
+  (an instance, ECS service, EKS node group or in-VPC Lambda) records that. An association whose
+  `route_table_id` is indirect (`local.table_ids[count.index]`), or a default route whose table or
+  NAT is, makes egress unknown too, where it used to be silently absent. Associations are resolved
+  once per graph, and each warning is printed once.
+- Every forcing scenario — `single-nat-death`, `resource-loss`, `slow-rds-failover` — aimed at a
+  NAT gateway or at a subnet a NAT lives in is inconclusive while a compute subnet's egress is
+  unknown (only `single-nat-death` at a NAT checked before).
+- **A multi-region plan put everything in the majority region.** A resource with no region of its
+  own now takes its provider's constant `region` (`configuration.provider_config`, e.g. an
+  `aws.west` alias), and a region outage in an estate spanning several regions is inconclusive
+  while any resource's region is still unknown.
+- **Local Zones and Wavelength Zones** (`us-west-2-lax-1a`, `us-east-1-wl1-bos-wlz-1`) were rejected
+  as malformed, and mapped to a non-region; they now belong to their parent region.
+- ⛔ **An outage aimed where the estate is not was a SILENT PASS.** The default `us-east-1a`
+  scenario against an ap-south-2 plan, a region name typo (`us-east1`), a zone with no letter: "no
+  failures", exit 0. Now `SimulateError::UnknownRegion` ("scenario targets region X; the modelled
+  estate is in Y") or `SimulateError::Malformed`, exit 1. An empty zone in the estate's own region
+  is still a real pass (with a warning when nothing declares that zone). When nothing declares a
+  region at all, the us-east-1 fallback no longer decides that an unplaceable resource is
+  elsewhere: it counts in every region, and a region outage is inconclusive.
+- ⛔ **An in-VPC Lambda had no zone at all.** `vpc_config.subnet_ids` that name nothing in the graph
+  now make a zone outage inconclusive (as for ECS and EKS), and a Lambda is lost when every one of
+  its subnets is down or has lost egress — any of them, when a plan could not say exactly which.
+  Before apply, WARDEN's `dynamic "vpc_config"` Lambdas make every zone outage of its plan
+  inconclusive: the honest answer until apply.
+- ⛔ **An association Helios could not resolve fell back to the main route table.** With `for_each =
+  aws_subnet.public` / `subnet_id = each.value.id`, a managed default route table through the NAT
+  gave the NAT's own subnet an egress edge to it — `DependencyCycle`, every command failed — and
+  without one, private subnets silently had no egress. The fallback now applies only when no
+  association could name the subnet; otherwise its egress is unknown and zone outages / NAT deaths
+  are inconclusive. `Egress` no longer counts for acyclicity: a subnet's `down` never reads it.
+- A reference list mixing a variable, local, module output, data source or `each.value` with real
+  resources (`var.ha ? [a.id, b.id] : [a.id]`) linked the union and called it exact; those are now
+  candidates, evaluated worst case.
+- `helios` wrote ANSI colour codes into non-terminal stderr (CI logs, the Action's
+  `.inconclusive.txt`), and the Action's `grep INCONCLUSIVE` also caught graph-build warnings. Colour
+  is now off unless stderr is a terminal, and the Action keeps only the `helios: INCONCLUSIVE` line.
+  An instance placed by its subnet no longer gets a "zone unknown" warning.
+- ⛔ **An `iam-revocation` whose principal NOTHING uses was a silent pass** ("no failures", exit 0),
+  in state and plan alike — the 0.1.4 unknown-target defect in another form. It is now
+  `SimulateError::UnknownPrincipal` (exit 1). The shipped three-tier scenario matches its Lambda
+  and is unchanged.
+- The "spawning python" error message carried a run of spaces from a broken string continuation.
+- ⛔ **An `iam-revocation` on a plan would have been a SILENT PASS.** Role ARNs are unknown before
+  apply, so nothing matched and the run read "resilient". A resource's role is now matched
+  through the `aws_iam_role` its configuration references (ARN name, role name or address), and
+  when a role cannot be followed — a variable, local, module output or data source, even as one
+  branch of a conditional next to a real role — the run is
+  `SimulateError::Inconclusive`: the CLI exits **3** with nothing on stdout, and the Action records
+  `<stem>.inconclusive.txt`, shows it in the PR comment and fails the `fail-on: failures` gate.
+- `count.index` pairing assumed the index WAS `count.index`; `[count.index % 2]` records the same
+  references. Pairing now requires equal instance counts (or, for `each.key`, an existing key);
+  otherwise every instance is linked, with a warning.
+- A subnet with no route-table association had no NAT edge: it now uses the VPC's main route table
+  (`aws_main_route_table_association`, else `aws_default_route_table`).
+
+### Changed
+
+- The Action clears its artifact directory at the start of each run, so a second invocation in one
+  job does not report the first one's scenarios.
+- The edges a resource's `down` reads (`Contains`, `Spread`, and the two read `MemberOf`s) must be
+  acyclic: a cycle would let the solver
+  choose between "all up" and "all down". `Error::DependencyCycle` names the resources. The unused
+  `Error::MissingReference` is gone.
+- `ResourceKind::tf_type()` is the inverse of `from_tf_type`, read from one table; the engine's
+  private copy of the mapping is gone. `ResourceKind` is now `Copy`.
+- Reasons: a resource lost through a placement group says so ("every one of its N `<via>`
+  placements is down", or, for a group that cannot lose a member, why — "desired_count 1 (where its
+  task runs is unknown)", "its zone is unknown until apply", "no automatic failover to a replica",
+  "placement could not be resolved exactly from the plan" — then "lost when any of its N `<via>`
+  placements is lost (worst case)"); compute lost through a NAT says "egress via NAT X (the default
+  route of S), which is down".
 
 ### Corrections
 

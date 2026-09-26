@@ -98,15 +98,112 @@ pub fn availability_for(tf_type: &str, attrs: &Value, default_region: &str) -> A
         "aws_s3_bucket" => AvailabilityModel::Regional {
             region: region_of(attrs, default_region),
         },
-        // Edge-ish services we'll add in v0.2+
+        // An Aurora instance lives in one zone -- but Terraform only knows which after apply. With
+        // no zone it is Regional here and its subnet-group spread decides (see `spread_rule`).
+        "aws_rds_cluster_instance" => match string_attr(attrs, "availability_zone") {
+            Some(az) => AvailabilityModel::SingleAz { az },
+            None => AvailabilityModel::Regional {
+                region: region_for(attrs, default_region),
+            },
+        },
+        // Everything else, including the 0.2 kinds (RDS/ElastiCache clusters, ECS, EKS, SQS, VPC
+        // endpoints, NAT gateways), is Regional: its zonal exposure comes from its graph edges
+        // (Contains / Spread), not from a zone attribute.
         _ => AvailabilityModel::Regional {
             region: region_for(attrs, default_region),
         },
     }
 }
 
+/// How a resource with `Spread` edges (a placement group: the subnets an ECS service runs in, the
+/// instances of an Aurora cluster) survives losing members of that group. Read from the attrs at
+/// SOLVE time, not graph-build time, so a `set_attr` fix such as `desired_count = 2` re-verifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpreadRule {
+    /// The group does not decide availability (the zone is known and modelled directly).
+    Ignore,
+    /// Up while any member is up: capacity >= 2 spread across the members.
+    AnySurvivor,
+    /// Capacity 1, or placement unknown until apply: assume the worst -- down when any member is.
+    FailsIfAnyDown,
+}
+
+/// The [`SpreadRule`] for a resource of `tf_type` with these attrs.
+pub fn spread_rule(tf_type: &str, attrs: &Value) -> SpreadRule {
+    use SpreadRule::*;
+    let at_least = |path: &[&str], n: u64| number_at(attrs, path).is_some_and(|v| v >= n);
+    match tf_type {
+        "aws_rds_cluster_instance" => {
+            if string_attr(attrs, "availability_zone").is_some() {
+                Ignore
+            } else {
+                FailsIfAnyDown
+            }
+        }
+        "aws_elasticache_replication_group" => {
+            let failover = attrs
+                .get("automatic_failover_enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if failover
+                && (at_least(&["num_cache_clusters"], 2)
+                    || at_least(&["replicas_per_node_group"], 1))
+            {
+                AnySurvivor
+            } else {
+                FailsIfAnyDown
+            }
+        }
+        "aws_ecs_service" if !at_least(&["desired_count"], 2) => FailsIfAnyDown,
+        "aws_eks_node_group" if !at_least(&["scaling_config", "desired_size"], 2) => FailsIfAnyDown,
+        // aws_rds_cluster (over its instances), interface VPC endpoints, and a satisfied ECS / EKS
+        // capacity: up while any member is.
+        _ => AnySurvivor,
+    }
+}
+
+/// A number at `path`, stepping into the first element of a list of blocks (`scaling_config[0]`).
+fn number_at(attrs: &Value, path: &[&str]) -> Option<u64> {
+    let mut v = attrs;
+    for seg in path {
+        if let Value::Array(items) = v {
+            v = items.first()?;
+        }
+        v = v.get(seg)?;
+    }
+    v.as_u64()
+}
+
+/// Would [`availability_for`] have to GUESS this resource's zone? A kind modelled by its own
+/// `availability_zone` that does not declare one is placed in the region's `a` zone -- a guess, so
+/// no zone-outage verdict about it can be trusted.
+pub fn zone_is_guessed(tf_type: &str, attrs: &Value) -> bool {
+    let known = string_attr(attrs, "availability_zone").is_some_and(|z| !z.is_empty());
+    let multi_az = attrs.get("multi_az").and_then(Value::as_bool) == Some(true);
+    match tf_type {
+        "aws_subnet" | "aws_instance" | "aws_elasticache_cluster" => !known,
+        "aws_db_instance" => !known && !multi_az,
+        _ => false,
+    }
+}
+
 /// Strip the trailing zone letter from an AZ id: `eu-west-2a` -> `eu-west-2`.
+///
+/// The region is everything up to the first `-`-separated part that starts with a digit, that
+/// part's digits included -- so a Local Zone (`us-west-2-lax-1a`) and a Wavelength Zone
+/// (`us-east-1-wl1-bos-wlz-1`) map to their PARENT region (`us-west-2`, `us-east-1`), whose outage
+/// takes them down. Anything else: the input with one trailing letter stripped.
 pub fn region_of_az(az: &str) -> Region {
+    let parts: Vec<&str> = az.split('-').collect();
+    if let Some(i) = parts
+        .iter()
+        .position(|p| p.starts_with(|c: char| c.is_ascii_digit()))
+    {
+        let digits: String = parts[i].chars().take_while(char::is_ascii_digit).collect();
+        if i >= 2 {
+            return format!("{}-{digits}", parts[..i].join("-"));
+        }
+    }
     if az
         .as_bytes()
         .last()
@@ -117,6 +214,39 @@ pub fn region_of_az(az: &str) -> Region {
     } else {
         az.to_string()
     }
+}
+
+/// A region name: `<area>-<name>-<number>` (`eu-west-2`), possibly with more name parts
+/// (`us-gov-west-1`).
+pub fn well_formed_region(region: &str) -> bool {
+    let parts: Vec<&str> = region.split('-').collect();
+    let (last, names) = parts.split_last().expect("split yields at least one part");
+    parts.len() >= 3
+        && names
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase()))
+        && !last.is_empty()
+        && last.chars().all(|c| c.is_ascii_digit())
+}
+
+/// A zone name: `<region><letter>` (`eu-west-2a`), or a Local / Wavelength Zone -- the parent
+/// region, then `-` and lowercase-alphanumeric parts (`us-west-2-lax-1a`,
+/// `us-east-1-wl1-bos-wlz-1`).
+pub fn well_formed_zone(az: &str) -> bool {
+    let region = region_of_az(az);
+    if !well_formed_region(&region) || !az.starts_with(&region) {
+        return false;
+    }
+    let rest = &az[region.len()..];
+    let letter = rest.len() == 1 && rest.chars().all(|c| c.is_ascii_lowercase());
+    let extended = rest.len() > 1
+        && rest.starts_with('-')
+        && rest[1..].split('-').all(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        });
+    letter || extended
 }
 
 /// The region field of an ARN: `arn:partition:service:REGION:account:resource`.
@@ -349,6 +479,85 @@ mod tests {
                 az: "us-east-1a".into()
             }
         );
+    }
+
+    #[test]
+    fn spread_rules_follow_capacity_and_zone_knowledge() {
+        use SpreadRule::*;
+        let r = spread_rule;
+        assert_eq!(r("aws_rds_cluster", &json!({})), AnySurvivor);
+        assert_eq!(r("aws_rds_cluster_instance", &json!({})), FailsIfAnyDown);
+        assert_eq!(
+            r(
+                "aws_rds_cluster_instance",
+                &json!({"availability_zone": "x-1a"})
+            ),
+            Ignore
+        );
+        assert_eq!(
+            r("aws_ecs_service", &json!({"desired_count": 1})),
+            FailsIfAnyDown
+        );
+        assert_eq!(
+            r("aws_ecs_service", &json!({"desired_count": 2})),
+            AnySurvivor
+        );
+        let ng = |n: u64| json!({"scaling_config": [{"desired_size": n}]});
+        assert_eq!(r("aws_eks_node_group", &ng(1)), FailsIfAnyDown);
+        assert_eq!(r("aws_eks_node_group", &ng(2)), AnySurvivor);
+        let rg = |failover: bool, n: u64| json!({"automatic_failover_enabled": failover, "num_cache_clusters": n});
+        assert_eq!(
+            r("aws_elasticache_replication_group", &rg(true, 2)),
+            AnySurvivor
+        );
+        assert_eq!(
+            r("aws_elasticache_replication_group", &rg(false, 2)),
+            FailsIfAnyDown
+        );
+        assert_eq!(
+            r("aws_elasticache_replication_group", &rg(true, 1)),
+            FailsIfAnyDown
+        );
+        assert_eq!(
+            r(
+                "aws_elasticache_replication_group",
+                &json!({"automatic_failover_enabled": true, "replicas_per_node_group": 1})
+            ),
+            AnySurvivor
+        );
+        assert_eq!(r("aws_vpc_endpoint", &json!({})), AnySurvivor);
+    }
+
+    #[test]
+    fn zones_map_to_their_parent_region() {
+        for (az, region) in [
+            ("us-east-1a", "us-east-1"),
+            ("eu-west-2c", "eu-west-2"),
+            ("us-gov-west-1a", "us-gov-west-1"),
+            ("us-west-2-lax-1a", "us-west-2"),
+            ("us-east-1-wl1-bos-wlz-1", "us-east-1"),
+            ("ap-south-2", "ap-south-2"),
+        ] {
+            assert_eq!(region_of_az(az), region, "{az}");
+        }
+        for ok in [
+            "us-east-1a",
+            "us-gov-west-1b",
+            "us-west-2-lax-1a",
+            "us-east-1-wl1-bos-wlz-1",
+        ] {
+            assert!(well_formed_zone(ok), "{ok}");
+        }
+        for bad in [
+            "us-east-1",
+            "useast1a",
+            "us-east-1ab",
+            "us-east-1-",
+            "US-EAST-1A",
+        ] {
+            assert!(!well_formed_zone(bad), "{bad}");
+        }
+        assert!(well_formed_region("us-gov-west-1") && !well_formed_region("us-east1"));
     }
 
     #[test]

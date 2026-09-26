@@ -15,10 +15,14 @@ pub enum Error {
     #[error("unknown resource type {0} (extend ResourceKind to support it)")]
     UnknownResourceType(String),
 
-    #[error("resource {resource} references unknown {field}={target}")]
-    MissingReference {
-        resource: String,
-        field: &'static str,
-        target: String,
-    },
+    #[error(
+        "not a `terraform show -json` document: it has neither `values` (from `terraform show -json` \
+         on a state) nor `planned_values` (from `terraform show -json <planfile>`)"
+    )]
+    NotTerraformJson,
+
+    /// The edges a resource's `down` reads (`Contains`, `Spread`, an ALB's `subnets`, a Lambda's
+    /// `subnet_ids`) formed a cycle of exact edges, so "is it down" has no unique answer.
+    #[error("dependency cycle through failure-propagating edges: {}", .0.join(" -> "))]
+    DependencyCycle(Vec<String>),
 }
