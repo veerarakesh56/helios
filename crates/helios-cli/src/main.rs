@@ -179,7 +179,7 @@ fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()
 /// or an error), so a pipeline cannot read "cannot say" as either.
 const EXIT_INCONCLUSIVE: i32 = 3;
 
-/// [`helios_engine::simulate`], exiting [`EXIT_INCONCLUSIVE`] on an inconclusive scenario.
+/// [`helios_engine::simulate()`], exiting [`EXIT_INCONCLUSIVE`] on an inconclusive scenario.
 fn simulate(
     graph: &helios_graph::ResourceGraph,
     scenario: &helios_engine::Scenario,
