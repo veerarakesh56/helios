@@ -159,43 +159,65 @@ fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()
     Ok(())
 }
 
-/// Shell out to `python -m helios_ai explain`, piping stdin through and stdout back.
-///
-/// The Python shell must be on PATH with `helios_ai` importable (e.g. from the
-/// helios-ai/.venv activated, or via `uv run --project helios-ai python -m ...`).
-/// Override the interpreter with `HELIOS_AI_PYTHON=/path/to/python`.
+/// Narrate a FailureChain read as JSON on stdin, via `python -m helios_ai explain`.
 fn cmd_explain() -> Result<()> {
-    use std::io::{Read, Write};
-    use std::process::{Command, Stdio};
+    use std::io::Read;
 
     let mut input = String::new();
     std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| anyhow::anyhow!("reading FailureChain JSON from stdin: {e}"))?;
+    run_helios_ai("explain", &input)
+}
 
-    let python = std::env::var("HELIOS_AI_PYTHON").unwrap_or_else(|_| "python".to_string());
+/// The interpreter that has `helios_ai` installed: `HELIOS_AI_PYTHON` if set, else the repo venv
+/// (`helios-ai/.venv`, relative to the working directory) if it exists, else `python` on PATH.
+fn helios_ai_python() -> PathBuf {
+    if let Some(p) = std::env::var_os("HELIOS_AI_PYTHON") {
+        return PathBuf::from(p);
+    }
+    for rel in [
+        "helios-ai/.venv/Scripts/python.exe",
+        "helios-ai/.venv/bin/python",
+    ] {
+        let p = PathBuf::from(rel);
+        if p.exists() {
+            return p;
+        }
+    }
+    PathBuf::from("python")
+}
 
+/// Run `python -m helios_ai <sub>`, writing `stdin` to it and passing its stdout/stderr through.
+/// Fails if the process cannot be spawned or exits non-zero.
+fn run_helios_ai(sub: &str, stdin: &str) -> Result<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let python = helios_ai_python();
+    let shown = python.display();
     let mut child = Command::new(&python)
-        .args(["-m", "helios_ai", "explain"])
+        .args(["-m", "helios_ai", sub])
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| {
             anyhow::anyhow!(
-                "spawning `{python} -m helios_ai explain` — is helios-ai installed? ({e})"
+                "spawning `{shown} -m helios_ai {sub}` — is helios-ai installed? Set HELIOS_AI_PYTHON                  or create helios-ai/.venv ({e})"
             )
         })?;
 
+    // Drop the pipe after writing so the child sees EOF.
     child
         .stdin
-        .as_mut()
+        .take()
         .expect("stdin piped")
-        .write_all(input.as_bytes())?;
+        .write_all(stdin.as_bytes())?;
 
     let status = child.wait()?;
     if !status.success() {
-        anyhow::bail!("`{python} -m helios_ai explain` failed: {status}");
+        anyhow::bail!("`{shown} -m helios_ai {sub}` failed: {status}");
     }
     Ok(())
 }

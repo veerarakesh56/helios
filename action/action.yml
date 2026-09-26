@@ -35,6 +35,13 @@ inputs:
     description: Name of the workflow artifact holding inspect JSONs.
     required: false
     default: helios-inspect
+  fail-on:
+    description: >
+      `never` (default) only reports. `failures` fails the step, after the
+      comment and artifacts are posted, when any scenario failed: its chain has
+      failures and no fix is committed, or `helios verify` exits non-zero.
+    required: false
+    default: never
 
 outputs:
   comment-body:
@@ -73,6 +80,7 @@ runs:
         FIXES_DIR: ${{ inputs.fixes-dir }}
         TERRAFORM_JSON: ${{ inputs.terraform-json }}
         ARTIFACT_DIR: ${{ runner.temp }}/helios-artifact
+        GATE_FILE: ${{ runner.temp }}/helios-gate.txt
       run: ${{ github.action_path }}/scripts/run-scenarios.sh
 
     - name: Build PR comment body
@@ -104,3 +112,20 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         COMMENT_PATH: ${{ runner.temp }}/helios-comment.md
       run: ${{ github.action_path }}/scripts/post-sticky.sh
+
+    - name: Gate on failed scenarios (fail-on)
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        GATE_FILE: ${{ runner.temp }}/helios-gate.txt
+      run: |
+        set -euo pipefail
+        case "$FAIL_ON" in
+          never) exit 0 ;;
+          failures) ;;
+          *) echo "::error::fail-on must be 'never' or 'failures', got '$FAIL_ON'"; exit 1 ;;
+        esac
+        if [[ -s "$GATE_FILE" ]]; then
+          echo "::error::helios: failing scenarios: $(paste -sd, "$GATE_FILE")"
+          exit 1
+        fi

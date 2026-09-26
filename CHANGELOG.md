@@ -4,6 +4,37 @@ All notable changes to Helios are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Action input `fail-on: never|failures` (default `never`). With `failures`, a final step — after the
+  comment and artifacts are posted — fails the job when any scenario failed: its chain has failures
+  and no fix is committed, or `helios verify` exits non-zero.
+- Golden `inspect` / `simulate --json` outputs for the five three-tier scenarios, and a test that the
+  CLI reproduces them byte for byte.
+- `scripts/check_publishable.py` (secret / state-file / public-IP / account-id guard, run in CI) and
+  `scripts/scrub_tfjson.py` (reduces a `terraform show -json` document to the topology Helios reads).
+- CI `msrv` job: `cargo check` on the declared minimum Rust.
+
+### Fixed
+
+- `rust-version` said 1.75; the dependency tree needs **1.88** (`time`, `zip`). Declared and checked in CI.
+- `make` recipes `cd helios-ai` and then ran a *relative* `HELIOS_AI_PYTHON`, and broke on a checkout
+  path with a space. The path is now absolute and quoted. `make demo` now defaults to
+  `HELIOS_AI_MOCK=1`, as the 0.1.0 entry already claimed; `HELIOS_AI_MOCK=0` runs the real model.
+- `helios explain` fell back to `python` on PATH; it now tries `helios-ai/.venv` first.
+- The two Python e2e tests in `crates/helios-cli/tests/cli.rs` passed silently when the venv was
+  missing; with `HELIOS_REQUIRE_PY=1` (set in CI) they fail instead.
+- `glossary.py` (the prompt's model reference) called S3 global and RDS regional; the code models S3
+  as Regional and RDS as SingleAz / MultiAz by `multi_az`.
+- `helios_ai.__version__` said 0.0.1; it now reads the installed package version.
+
+### Corrections
+
+- The 0.1.0 entry listed a `launch/` folder (Show-HN draft, CFP abstract, outreach templates). It was
+  never in this repository; the bullet has been removed.
+
 ## [0.1.4] - 2026-09-06
 
 ### Fixed
@@ -211,7 +242,6 @@ viewer.
   `make demo` runs the spec choreography with `HELIOS_AI_MOCK=1`.
 - `docs/demo.gif` -- animated demo embedded at the top of the README.
 - `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/{bug,feature}.yml`.
-- `launch/` -- Show-HN draft, SRECon CFP abstract, outreach DM templates.
 
 ### Changed
 

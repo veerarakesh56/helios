@@ -19,7 +19,8 @@ There are four variants.
 
 Lives in exactly one availability zone. Unavailable iff that AZ is
 unavailable. Example kinds: aws_subnet (single-AZ), aws_instance,
-aws_elasticache_cluster (non-replicated).
+aws_elasticache_cluster (non-replicated), aws_db_instance with
+`multi_az = false` (its `availability_zone`).
 
 ## MultiAz { azs, failover_seconds }
 
@@ -28,7 +29,9 @@ available. `failover_seconds` is the expected window during which a
 failover is visible to clients; for the purposes of SMT availability
 this is treated as "temporarily unavailable" during an AZ loss but
 recovers within the window. Example kinds: aws_db_instance with
-multi-AZ standby, aws_lb spanning subnets in 2+ AZs.
+`multi_az = true` (Terraform state does not say which zones, so the pair
+is assumed to be `<region>a` and `<region>b`), aws_lb spanning subnets in
+2+ AZs.
 
 ## Regional { region }
 
@@ -36,13 +39,14 @@ Control-plane resource scoped to a region, not a specific AZ. Available
 iff the region is available. Note: a "region outage" scenario takes out
 every Regional resource in that region, even if individually each AZ
 might still be up. Example kinds: aws_lambda_function, aws_vpc,
-aws_db_instance (primary region view).
+aws_s3_bucket, and any resource type Helios does not model specifically.
 
 ## GlobalEdge
 
 Edge / global resource. Treated as always available for current
-scenario semantics — not affected by region or AZ outages. Example
-kinds: aws_s3_bucket (global namespace), CloudFront (future).
+scenario semantics — not affected by region or AZ outages. No modelled
+kind maps here yet; Route53 and CloudFront are the intended future
+examples.
 
 ## Propagation rules
 

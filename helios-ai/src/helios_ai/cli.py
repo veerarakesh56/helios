@@ -6,7 +6,9 @@
 
 If HELIOS_AI_MOCK=1 is set, a canned fake client is used instead of the
 real Anthropic SDK — used by the Rust end-to-end smoke test and anyone
-running the CLI without an API key.
+running the CLI without an API key. Otherwise HELIOS_AI_PROVIDER picks
+`anthropic` (default, needs ANTHROPIC_API_KEY) or `claude_cli` (the local
+`claude` CLI on a Claude subscription, no key).
 """
 
 from __future__ import annotations
@@ -21,12 +23,24 @@ from .explain import explain
 from .fix_generator import propose_fix
 from .models import FailureChain
 
+_PROVIDERS = ("anthropic", "claude_cli", "claude-cli")
+
 
 def _build_client() -> Any:
     if os.environ.get("HELIOS_AI_MOCK") == "1":
         from ._mock import MockAnthropic
 
         return MockAnthropic()
+
+    provider = os.environ.get("HELIOS_AI_PROVIDER", "anthropic")
+    if provider not in _PROVIDERS:
+        raise SystemExit(
+            f"unknown HELIOS_AI_PROVIDER={provider!r}; known: {', '.join(_PROVIDERS)}"
+        )
+    if provider != "anthropic":
+        from ._claude_cli import ClaudeCliClient
+
+        return ClaudeCliClient()
 
     import anthropic  # lazy — tests that mock _build_client don't need SDK
 
@@ -45,8 +59,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Read {chain, attrs_snapshot} JSON on stdin, write FixProposal JSON on stdout.",
     )
     args = parser.parse_args(argv)
+    # UTF-8 both ways, not the Windows code page: the engine writes UTF-8 JSON and the model's
+    # `—`/`→` must reach the Rust wrapper intact (cp1252 wrote them as mojibake).
+    for stream in (sys.stdin, sys.stdout):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    try:
+        return _run(args.cmd)
+    except RuntimeError as exc:
+        # Provider failure or a reply that is not a valid FixProposal: nothing on stdout, so a
+        # pipeline into `helios verify --fix` sees an empty file, never a half-trusted one.
+        print(f"helios-ai: {exc}", file=sys.stderr)
+        return 1
 
-    if args.cmd == "explain":
+
+def _run(cmd: str) -> int:
+    if cmd == "explain":
         raw = sys.stdin.read()
         chain = FailureChain.model_validate_json(raw)
         client = _build_client()
@@ -54,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd == "propose-fix":
+    if cmd == "propose-fix":
         raw = sys.stdin.read()
         payload = json.loads(raw)
         chain = FailureChain.model_validate(payload["chain"])

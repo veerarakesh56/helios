@@ -4,11 +4,16 @@
 #   - if $FIXES_DIR/<stem>.json exists, run `helios verify` and capture
 #     a per-scenario summary line into $ARTIFACT_DIR/<stem>.verify.txt
 #
-# Inputs (env): HELIOS_BIN, SCENARIOS_GLOB, FIXES_DIR, TERRAFORM_JSON, ARTIFACT_DIR
+# A scenario FAILS when its chain has failures and no fix is committed, or when
+# `helios verify` exits non-zero. Failed stems are written one per line to
+# $GATE_FILE (empty file = all passed); the action's last step gates on it.
+#
+# Inputs (env): HELIOS_BIN, SCENARIOS_GLOB, FIXES_DIR, TERRAFORM_JSON, ARTIFACT_DIR, GATE_FILE
 # Output (GHA step): artifact-dir = $ARTIFACT_DIR
 set -euo pipefail
 
 mkdir -p "$ARTIFACT_DIR"
+: > "$GATE_FILE"
 
 # Expand the glob portably. Globbing inside `for` requires no quotes.
 shopt -s nullglob
@@ -31,6 +36,9 @@ for scenario in "${matches[@]}"; do
   fi
   echo "wrote $inspect_out ($(wc -c < "$inspect_out") bytes)"
 
+  # A standalone assignment, so `set -e` aborts if jq is missing rather than the gate silently passing.
+  failure_count=$(jq '.chain.failures | length' "$inspect_out")
+
   fix_path="$FIXES_DIR/$stem.json"
   if [[ -f "$fix_path" ]]; then
     verify_out="$ARTIFACT_DIR/$stem.verify.txt"
@@ -41,6 +49,9 @@ for scenario in "${matches[@]}"; do
     rc=$?
     set -e
     echo "wrote $verify_out (verify rc=$rc)"
+    if [[ $rc -ne 0 ]]; then echo "$stem" >> "$GATE_FILE"; fi
+  elif [[ $failure_count -gt 0 ]]; then
+    echo "$stem" >> "$GATE_FILE"
   fi
 
   echo "::endgroup::"

@@ -27,6 +27,20 @@ fn venv_python(root: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
+/// The venv interpreter, or None after printing "skipping". With `HELIOS_REQUIRE_PY=1` (set in CI) a
+/// missing venv panics instead, so the Python e2e tests cannot pass by silently not running.
+fn venv_python_or_skip(root: &std::path::Path) -> Option<PathBuf> {
+    let python = venv_python(root);
+    if python.is_none() {
+        assert!(
+            std::env::var("HELIOS_REQUIRE_PY").as_deref() != Ok("1"),
+            "HELIOS_REQUIRE_PY=1 but helios-ai/.venv is missing — run `uv sync` in helios-ai/"
+        );
+        eprintln!("skipping: helios-ai/.venv not found — run `uv sync` in helios-ai/");
+    }
+    python
+}
+
 #[test]
 fn simulate_json_emits_failure_chain_as_json() {
     let root = repo_root();
@@ -70,8 +84,7 @@ fn explain_subcommand_pipes_stdin_to_python() {
     use std::process::{Command, Stdio};
 
     let root = repo_root();
-    let Some(python) = venv_python(&root) else {
-        eprintln!("skipping: helios-ai/.venv not found — run `uv sync` in helios-ai/");
+    let Some(python) = venv_python_or_skip(&root) else {
         return;
     };
 
@@ -116,8 +129,7 @@ fn propose_fix_subcommand_emits_valid_fix_json_via_mock() {
     use std::process::{Command, Stdio};
 
     let root = repo_root();
-    let Some(python) = venv_python(&root) else {
-        eprintln!("skipping: helios-ai/.venv not found — run `uv sync` in helios-ai/");
+    let Some(python) = venv_python_or_skip(&root) else {
         return;
     };
 
@@ -304,4 +316,44 @@ fn simulate_plain_still_works() {
         stdout.contains("lose-us-east-1a") || stdout.contains("FAIL") || stdout.contains("aws_"),
         "plain render should mention the scenario or failures; got: {stdout}"
     );
+}
+
+/// Locks the three-tier outputs: every refactor must reproduce these bytes (CRLF-normalised, so a
+/// Windows checkout with autocrlf still compares). Regenerate only for a deliberate, disclosed change.
+#[test]
+fn three_tier_outputs_are_byte_identical() {
+    let root = repo_root();
+    let golden = root.join("crates/helios-cli/tests/golden/three-tier");
+    for scenario in [
+        "az-outage",
+        "iam-revocation",
+        "region-outage",
+        "single-nat-death",
+        "slow-rds-failover",
+    ] {
+        let scenario_path = format!("fixtures/scenarios/{scenario}.yaml");
+        for (cmd, args) in [
+            ("inspect", vec!["inspect"]),
+            ("simulate", vec!["simulate", "--json"]),
+        ] {
+            let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+                .current_dir(&root)
+                .args(&args)
+                .args(["fixtures/three-tier-webapp", "--scenario", &scenario_path])
+                .output()
+                .expect("failed to spawn helios");
+            let want = std::fs::read_to_string(golden.join(format!("{scenario}.{cmd}.json")))
+                .expect("golden file")
+                .replace("\r\n", "\n");
+            let got = String::from_utf8(output.stdout)
+                .expect("utf-8 stdout")
+                .replace("\r\n", "\n");
+            assert_eq!(
+                got,
+                want,
+                "{scenario} {cmd} drifted from its golden; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }

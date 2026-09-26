@@ -3,7 +3,7 @@
 //! Each AWS resource kind we support has a canonical failure footprint. An EC2 instance
 //! lives in exactly one AZ; an RDS with `multi_az = true` spans two; an S3 bucket is
 //! regional. These are hand-authored, not inferred, because the correctness of the whole
-//! simulator depends on them. Contributions welcome — see docs/availability-models.md.
+//! simulator depends on them. Contributions welcome — see CONTRIBUTING.md.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

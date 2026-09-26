@@ -1,7 +1,7 @@
 # Helios
 
 [![CI](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml/badge.svg)](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 > Deterministic failure simulation for cloud infrastructure.
@@ -13,11 +13,9 @@
 that runs every scenario on a pull request and posts the verdict, and a web viewer. **85 tests
 (65 Rust, 20 Python), plus 6 for the viewer; CI green.**
 
-> The Action **reports**; it does not block. `action/scripts/run-scenarios.sh` captures `helios verify`'s
-> exit code inside `set +e` (its own comment: *"capture but don't abort"*) and `helios inspect` returns
-> success even when the chain has failures, so no step fails a check on a discovered failure. The gate is
-> the **CLI**: `simulate` and `verify` exit 1, so a workflow calling `helios simulate` directly does block.
-> Wiring that into the Action is a one-line change, deferred.
+> The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
+> artifacts are posted, it fails the job when any scenario has failures and no committed fix, or its fix
+> does not verify. The CLI blocks on its own: `simulate` and `verify` exit 1 on failures.
 
 | | |
 |---|---|
@@ -69,11 +67,20 @@ make demo
 ```
 
 `make demo` simulates an AZ outage against the bundled three-tier webapp fixture, narrates the
-failure chain through the AI shell, applies a structured fix proposal, and re-verifies.
-Set `HELIOS_AI_MOCK=1` for a no-network run.
+failure chain through the AI shell, applies a structured fix proposal, and re-verifies. It runs
+mocked (`HELIOS_AI_MOCK=1`, no network) unless you say otherwise.
 
-For a real run, set `ANTHROPIC_API_KEY` and point `HELIOS_AI_PYTHON` at the interpreter that has
-`helios_ai` installed (e.g. `helios-ai/.venv/bin/python`).
+For a real run, `uv sync` in `helios-ai/`, set `ANTHROPIC_API_KEY`, and run
+`make demo HELIOS_AI_MOCK=0`. `helios explain` uses `HELIOS_AI_PYTHON` if set, else
+`helios-ai/.venv` when run from the repo root, else `python` on PATH.
+
+**Windows:** the build downloads Z3 and links `libz3.dll`, which is not copied next to `helios.exe`.
+`cargo run -p helios-cli -- …` puts it on PATH for you. To run the binary directly, copy the DLL
+once (Git Bash):
+
+```bash
+cp "$(find target/debug/build -name libz3.dll | head -1)" target/debug/   # or target/release
+```
 
 ## Commands
 
@@ -140,6 +147,7 @@ jobs:
       - uses: veerarakesh56/helios/action@v0.1.4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on: failures   # optional; default `never` only reports
 ```
 
 ## Web viewer

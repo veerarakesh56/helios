@@ -18,8 +18,17 @@ jobs:
   check:
     name: check / fmt / clippy / test
     runs-on: ubuntu-latest
+    env:
+      # The Python e2e tests in crates/helios-cli/tests/cli.rs fail (not skip) without the venv.
+      HELIOS_REQUIRE_PY: "1"
     steps:
       - uses: actions/checkout@v4
+
+      - name: No secrets, state or plan files in the tree
+        run: python3 scripts/check_publishable.py
+
+      - name: Publish-guard tests (check_publishable, scrub_tfjson)
+        run: python3 -m unittest discover -s scripts -v
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -51,6 +60,26 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  msrv:
+    name: msrv / cargo check (Rust 1.88)
+    runs-on: ubuntu-latest
+    env:
+      # Overrides rust-toolchain.toml's `stable` channel.
+      RUSTUP_TOOLCHAIN: "1.88"
+      # z3-sys downloads its prebuilt Z3 from GitHub releases; authenticated to dodge the rate limit.
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo check on the declared rust-version
+        run: cargo check --workspace --all-targets --locked
 
   python-check:
     name: python / ruff / pytest
@@ -139,3 +168,18 @@ jobs:
           grep -q '<!-- helios-action -->' "$path"
           grep -q 'az-outage' "$path"
           grep -q 'iam-revocation' "$path"
+
+      - name: Run helios action with fail-on=failures (must fail)
+        id: helios-gate
+        continue-on-error: true
+        uses: ./action
+        with:
+          github-token: ${{ github.token }}
+          fail-on: failures
+          artifact-name: helios-inspect-gate
+
+      - name: Assert fail-on=failures failed the job step
+        shell: bash
+        run: |
+          echo "fail-on=failures outcome: ${{ steps.helios-gate.outcome }}"
+          test "${{ steps.helios-gate.outcome }}" = failure

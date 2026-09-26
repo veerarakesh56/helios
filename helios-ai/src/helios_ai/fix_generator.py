@@ -15,6 +15,8 @@ import json
 import os
 from typing import Any
 
+from pydantic import ValidationError
+
 from .glossary import AVAILABILITY_MODEL_GLOSSARY
 from .models import FailureChain, FixProposal
 
@@ -109,5 +111,9 @@ def propose_fix(
     )
     for block in response.content:
         if getattr(block, "type", None) == "text":
-            return FixProposal.model_validate_json(block.text)
+            # Fail closed: whatever the provider returned is only a FixProposal if it validates.
+            try:
+                return FixProposal.model_validate_json(block.text)
+            except ValidationError as exc:
+                raise RuntimeError(f"model output is not a valid FixProposal: {exc}") from exc
     raise RuntimeError("Claude returned no text content")

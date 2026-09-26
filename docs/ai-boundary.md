@@ -68,6 +68,19 @@ not hallucinating?* We do not trust the proposal. We re-verify it.
 | Fix proposal | Yes (Claude Opus) | Suggests `set_attr` edits, then **re-verified by engine** |
 | Plain-English scenario parser (v0.2) | Yes (Claude Sonnet) | "what if us-east-1 goes down" -> scenario YAML |
 
+## Providers, and why the model gets no tools
+
+The shell talks to Claude through one of two providers (`HELIOS_AI_PROVIDER`): the Anthropic SDK
+(`anthropic`, the default) or the local `claude` CLI on a Claude subscription (`claude_cli`). The
+boundary is the same for both: whatever comes back is a candidate, and a `FixProposal` that does
+not validate against the schema is rejected (exit 1, empty stdout) before the engine ever sees it.
+
+The user turn carries Terraform attrs, which are untrusted input -- a resource description or tag
+can hold an injected instruction. So the model is given nothing to act on: no tool definitions on
+the SDK path, and on the CLI path `--tools ""`, `--strict-mcp-config`, `--setting-sources ""`, a
+named `--disallowed-tools` list and a cwd outside the repository. An injected instruction can at
+worst change the text of a candidate, which the engine then re-verifies like any other.
+
 ## Prior art: differential testing as a verification harness
 
 Helios is not the first system to put a deterministic core behind an

@@ -19,6 +19,11 @@ dist/
 # Terraform working state — never commit
 *.tfstate
 *.tfstate.backup
+tfplan*
+*.tfplan
+plan.out
+# Real plan/state JSON used to validate Helios; only scrubbed copies (scripts/scrub_tfjson.py) go in fixtures/
+/validation/
 .terraform/
 .terraform.lock.hcl
 crash.log
