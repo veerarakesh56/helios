@@ -258,3 +258,27 @@ fn an_unknown_egress_is_recorded_only_where_compute_runs() {
         );
     }
 }
+
+#[test]
+fn a_file_written_by_windows_powershell_loads_like_the_plain_one() {
+    // `terraform show -json > x.json` in Windows PowerShell 5.1 writes UTF-16LE with a BOM;
+    // `Out-File -Encoding utf8` writes UTF-8 with one. Both used to fail as "not UTF-8" / "not JSON".
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let plain = root.join("three-tier-webapp/terraform-show.json");
+    let text = std::fs::read_to_string(&plain).expect("fixture");
+    let dir = std::env::temp_dir().join(format!("helios-bom-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let utf16: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(text.encode_utf16().flat_map(u16::to_le_bytes))
+        .collect();
+    let utf8_bom: Vec<u8> = "\u{feff}".bytes().chain(text.bytes()).collect();
+    let want = edges(&helios_graph::load(&plain).expect("plain"));
+    for (name, bytes) in [("utf16.json", utf16), ("utf8bom.json", utf8_bom)] {
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).expect("write");
+        let got = helios_graph::load(&p).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(edges(&got), want, "{name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

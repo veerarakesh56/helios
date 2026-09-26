@@ -61,11 +61,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     # UTF-8 both ways, not the Windows code page: the engine writes UTF-8 JSON and the model's
     # `—`/`→` must reach the Rust wrapper intact (cp1252 wrote them as mojibake).
-    for stream in (sys.stdin, sys.stdout):
+    # stdin as utf-8-sig: Windows PowerShell 5.1 prefixes a byte-order mark to what it pipes in.
+    for stream, encoding in ((sys.stdin, "utf-8-sig"), (sys.stdout, "utf-8")):
         if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
+            stream.reconfigure(encoding=encoding)
     try:
         return _run(args.cmd)
+    except _BadInput as exc:
+        print(f"helios-ai: stdin is not valid {args.cmd} input: {exc}", file=sys.stderr)
+        return 2
     except RuntimeError as exc:
         # Provider failure or a reply that is not a valid FixProposal: nothing on stdout, so a
         # pipeline into `helios verify --fix` sees an empty file, never a half-trusted one.
@@ -73,20 +77,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+class _BadInput(Exception):
+    """stdin is not the JSON the subcommand reads: one line on stderr, not a traceback."""
+
+
 def _run(cmd: str) -> int:
     if cmd == "explain":
-        raw = sys.stdin.read()
-        chain = FailureChain.model_validate_json(raw)
+        try:
+            chain = FailureChain.model_validate_json(sys.stdin.read())
+        except ValueError as exc:  # pydantic's ValidationError is a ValueError
+            raise _BadInput(exc) from exc
         client = _build_client()
         sys.stdout.write(explain(chain, client=client))
         sys.stdout.write("\n")
         return 0
 
     if cmd == "propose-fix":
-        raw = sys.stdin.read()
-        payload = json.loads(raw)
-        chain = FailureChain.model_validate(payload["chain"])
-        attrs_snapshot = payload.get("attrs_snapshot", {})
+        try:
+            payload = json.loads(sys.stdin.read())
+            chain = FailureChain.model_validate(payload["chain"])
+            attrs_snapshot = payload.get("attrs_snapshot", {})
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise _BadInput(exc) from exc
         client = _build_client()
         fix = propose_fix(chain, attrs_snapshot=attrs_snapshot, client=client)
         sys.stdout.write(fix.model_dump_json(indent=2))

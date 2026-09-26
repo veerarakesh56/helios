@@ -205,7 +205,8 @@ fn cmd_explain() -> Result<()> {
     std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| anyhow::anyhow!("reading FailureChain JSON from stdin: {e}"))?;
-    run_helios_ai("explain", &input)
+    // Windows PowerShell 5.1 prefixes a byte-order mark to what it pipes into a native command.
+    run_helios_ai("explain", input.trim_start_matches('\u{feff}'))
 }
 
 /// Simulate, then pipe `{chain, attrs_snapshot}` to `python -m helios_ai propose-fix`, whose

@@ -126,3 +126,112 @@ fn before_apply_a_nat_death_is_inconclusive_not_the_nat_alone() {
         other => panic!("expected Inconclusive, got {other:?}"),
     }
 }
+
+fn fix(edits: serde_json::Value) -> helios_engine::FixProposal {
+    serde_json::from_value(serde_json::json!({
+        "scenario_name": "lose-ap-south-2a", "explanation": "t", "edits": edits
+    }))
+    .expect("fix")
+}
+
+fn verify_2a(
+    edits: serde_json::Value,
+) -> Result<helios_engine::VerifyReport, helios_engine::VerifyError> {
+    let g =
+        from_json(&std::fs::read_to_string(root().join(STATE)).expect("fixture")).expect("parses");
+    let s = scenario::load(&root().join("scenarios/az-2a.yaml")).expect("scenario");
+    helios_engine::verify(&g, &s, &fix(edits))
+}
+
+#[test]
+fn a_capacity_fix_written_as_a_dotted_path_verifies() {
+    // What Claude actually proposed on this stack (2026-09-26): `scaling_config.desired_size`.
+    // It used to be stored as a literal top-level key named "scaling_config.desired_size" -- read
+    // by nothing, so the node group stayed "failed" and the fix looked wrong.
+    for key in [
+        "scaling_config.desired_size",
+        "scaling_config[0].desired_size",
+    ] {
+        let r = verify_2a(serde_json::json!([{
+            "op": "set_attr", "resource_id": "aws_eks_node_group.this", "key": key, "value": 2
+        }]))
+        .unwrap_or_else(|e| panic!("{key}: {e}"));
+        assert_eq!(
+            r.resolved,
+            vec!["aws_eks_node_group.this".to_string()],
+            "{key}"
+        );
+        assert!(r.new_failures.is_empty(), "{key}");
+    }
+}
+
+#[test]
+fn moving_a_resource_is_refused_not_verified_as_a_fix_that_changed_nothing() {
+    // Claude's other edits on this stack: move the NAT to 2b, add a 2b subnet to the endpoints.
+    for (id, key) in [
+        ("aws_nat_gateway.this", "subnet_id"),
+        (r#"aws_vpc_endpoint.interface["sqs"]"#, "subnet_ids"),
+        (
+            "aws_ecs_service.orders_api",
+            "network_configuration.subnets",
+        ),
+    ] {
+        let r = verify_2a(serde_json::json!([{
+            "op": "set_attr", "resource_id": id, "key": key, "value": "subnet-00000000000000002"
+        }]));
+        match r {
+            Err(helios_engine::VerifyError::Apply(helios_engine::FixError::PlacementKey {
+                key: k,
+                ..
+            })) => {
+                assert_eq!(k, key)
+            }
+            other => panic!("{id} {key}: expected PlacementKey, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_path_into_nothing_is_an_error_not_a_new_key() {
+    let r = verify_2a(serde_json::json!([{
+        "op": "set_attr", "resource_id": "aws_eks_node_group.this", "key": "no_such_block.size", "value": 2
+    }]));
+    assert!(
+        matches!(
+            r,
+            Err(helios_engine::VerifyError::Apply(
+                helios_engine::FixError::Path { .. }
+            ))
+        ),
+        "{r:?}"
+    );
+}
+
+#[test]
+fn every_attribute_an_edge_is_built_from_is_a_placement_key() {
+    let src = include_str!("../../helios-graph/src/resource.rs");
+    let mut roots = BTreeSet::new();
+    for kind in [
+        "Contains(\"",
+        "MemberOf(\"",
+        "Spread(\"",
+        "Egress(\"",
+        "direct(\"",
+    ] {
+        for chunk in src.split(kind).skip(1) {
+            let attr = chunk.split('"').next().unwrap_or_default();
+            if attr.len() > 1 {
+                roots.insert(attr.split('.').next().unwrap_or_default().to_string());
+            }
+        }
+    }
+    let missing: Vec<_> = roots
+        .iter()
+        .filter(|r| !helios_engine::fix::PLACEMENT_KEYS.contains(&r.as_str()))
+        .collect();
+    assert!(roots.len() >= 12, "{roots:?}");
+    assert!(
+        missing.is_empty(),
+        "edges are built from {missing:?}, which a fix could silently set"
+    );
+}

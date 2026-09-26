@@ -19,7 +19,10 @@ Helios runs in two stages:
 2. **Shell (Python + Claude).** Reads the `FailureChain` JSON over stdio and
    produces (a) a human-readable narration of the failure, and (b) a
    structured `FixProposal` -- a JSON document of `set_attr` edits to apply
-   to the graph.
+   to the graph. A key is an attribute path (`scaling_config.desired_size`).
+   An edit that would MOVE a resource (its subnets, cluster, VPC, NAT, queue
+   links) is refused by the engine: edges are derived once from the input,
+   so such an edit would change nothing and must not pass as evaluated.
 
 The shell never decides whether something is safe. It explains what the
 engine already proved, and it suggests changes whose safety the engine then

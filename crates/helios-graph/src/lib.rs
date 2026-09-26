@@ -50,11 +50,31 @@ pub fn load_with_source<P: AsRef<Path>>(path: P) -> Result<(ResourceGraph, Sourc
     } else {
         path.to_path_buf()
     };
-    let raw = std::fs::read_to_string(&json_path).map_err(|e| Error::ReadFile {
-        path: json_path.clone(),
-        source: e,
-    })?;
+    let raw = std::fs::read(&json_path)
+        .and_then(decode_text)
+        .map_err(|e| Error::ReadFile {
+            path: json_path.clone(),
+            source: e,
+        })?;
     from_json_with_source(&raw)
+}
+
+/// Text as Windows writes it: UTF-8 with or without a byte-order mark, or UTF-16LE with one --
+/// what `terraform show -json > plan.json` produces in Windows PowerShell 5.1.
+pub fn decode_text(bytes: Vec<u8>) -> std::io::Result<String> {
+    let invalid = |e: String| std::io::Error::new(std::io::ErrorKind::InvalidData, e);
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = rest
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16(&units).map_err(|e| invalid(e.to_string()));
+    }
+    let text = String::from_utf8(bytes).map_err(|e| invalid(e.to_string()))?;
+    Ok(match text.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_string(),
+        None => text,
+    })
 }
 
 /// Parse a raw Terraform JSON string into a resource graph.

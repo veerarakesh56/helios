@@ -70,6 +70,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A fix could be "verified" without being evaluated.** `set_attr` stored its key verbatim, so
+  `scaling_config.desired_size` became a new top-level attribute with a dot in its name, which nothing
+  read; the node group stayed failed and a correct fix looked wrong. Keys are now paths
+  (`scaling_config.desired_size`, `scaling_config[0].desired_size`; a list of blocks is entered at its
+  first element), and a path into nothing is an error. An edit to an attribute the graph's edges are
+  built from (`subnet_id`, `subnet_ids`, `vpc_config`, `cluster`, ... - `fix::PLACEMENT_KEYS`, checked
+  against `resource.rs` by a test) is **refused**: edges are derived once, so moving a resource by
+  `set_attr` changed nothing. Found by a real Claude run on WARDEN's Wave 4 stack, which proposed moving
+  the NAT; with the rules in its prompt it now proposes the capacity edit, which verifies, and says the
+  NAT and endpoints need Terraform changes.
+- Windows input: `helios explain` piped from Windows PowerShell 5.1 failed on the byte-order mark it
+  prepends, with a raw pydantic traceback. The BOM is stripped (Rust and Python), a Terraform JSON
+  written as UTF-16LE (`terraform show -json > x` in PowerShell 5.1) is decoded, and input that is not
+  a chain is one line on stderr, exit 2.
 - **Losing a NAT on a plan could under-report.** When some compute's subnets could not be placed
   (WARDEN's Wave 4 Lambdas: `dynamic "vpc_config"`), `single-nat-death` returned the NAT alone as
   a verdict; the applied state loses three Lambdas with it. It is now **inconclusive** (exit 3),

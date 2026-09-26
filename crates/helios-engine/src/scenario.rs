@@ -58,7 +58,7 @@ pub fn load(path: &Path) -> Result<Scenario, ScenarioError> {
         path: path.to_path_buf(),
         source,
     })?;
-    Ok(serde_yaml_ng::from_str(&raw)?)
+    Ok(serde_yaml_ng::from_str(raw.trim_start_matches('\u{feff}'))?)
 }
 
 #[cfg(test)]

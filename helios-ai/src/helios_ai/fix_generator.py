@@ -43,6 +43,19 @@ Rules:
   a load balancer's availability_zones, moving a SingleAz resource to a
   different availability_zone, or turning a SingleAz service into its
   multi-AZ equivalent are all valid moves when the glossary supports them.
+- `key` is an attribute path. A nested block is a one-element list in
+  Terraform JSON: write `scaling_config.desired_size` (or
+  `scaling_config[0].desired_size`). A path into an attribute that does
+  not exist is rejected.
+- You cannot MOVE a resource. Edits to what places it -- subnet_id,
+  subnet_ids, subnets, vpc_config, network_configuration, vpc_id, cluster,
+  cluster_name, cluster_identifier, db_subnet_group_name,
+  subnet_group_name, nat_gateway_id, event_source_arn, redrive_policy --
+  are refused: the engine builds its graph from them once. Fix placement
+  problems through capacity or failover attributes (desired_count,
+  scaling_config.desired_size, num_cache_clusters,
+  automatic_failover_enabled, multi_az, availability_zone), or say in the
+  explanation that the Terraform itself must change.
 - The engine will re-simulate the scenario with your edits applied; only
   verified fixes (those that make the chain empty) count as resolutions.
 - If no set_attr edit can plausibly resolve the chain inside v0.1's

@@ -125,3 +125,18 @@ def test_cli_propose_fix_mock_env_without_api_key(monkeypatch, capsys) -> None:
 
     parsed = json.loads(out)
     assert parsed["scenario_name"] == "noop"
+
+
+def test_the_prompt_names_every_key_the_engine_refuses() -> None:
+    """The engine refuses edits that would move a resource (fix.rs PLACEMENT_KEYS). A model not
+    told so proposes them -- on WARDEN's Wave 4 stack it proposed moving the NAT."""
+    import pathlib
+    import re
+
+    from helios_ai.fix_generator import SYSTEM_PERSONA
+
+    src = pathlib.Path(__file__).resolve().parents[2] / "crates/helios-engine/src/fix.rs"
+    table = src.read_text(encoding="utf-8").split("PLACEMENT_KEYS: &[&str] = &[")[1].split("];")[0]
+    keys = re.findall(r'"([a-z_]+)"', table)
+    assert len(keys) >= 12
+    assert [k for k in keys if k not in SYSTEM_PERSONA] == []

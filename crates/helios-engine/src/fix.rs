@@ -43,6 +43,89 @@ pub enum FixError {
     UnknownResource(String),
     #[error("resource {0:?} has non-object attrs; cannot set key")]
     AttrsNotObject(String),
+    /// Edges are derived once, from the input: an edit that moves a resource (its subnets, cluster,
+    /// VPC, NAT, queue links) would change an attribute nothing reads again. Refused rather than
+    /// "verified" as a fix that changed nothing.
+    #[error(
+        "{resource:?}: `{key}` places the resource (Helios builds its graph from it once, so the \
+         edit would not move anything). Change the Terraform and re-run instead"
+    )]
+    PlacementKey { resource: String, key: String },
+    #[error("{resource:?}: cannot set `{key}`: {why}")]
+    Path {
+        resource: String,
+        key: String,
+        why: String,
+    },
+}
+
+/// The attributes the graph's edges are read from (`crates/helios-graph/src/resource.rs`), by
+/// their first path segment. A test checks this against that file.
+pub const PLACEMENT_KEYS: &[&str] = &[
+    "cluster",
+    "cluster_identifier",
+    "cluster_name",
+    "db_subnet_group_name",
+    "event_source_arn",
+    "nat_gateway_id",
+    "network_configuration",
+    "redrive_policy",
+    "subnet_group_name",
+    "subnet_id",
+    "subnet_ids",
+    "subnets",
+    "vpc_config",
+    "vpc_id",
+];
+
+/// One path segment: `name` or `name[3]`.
+fn segment(s: &str) -> (&str, Option<usize>) {
+    match s.strip_suffix(']').and_then(|s| s.split_once('[')) {
+        Some((name, i)) => (name, i.parse().ok()),
+        None => (s, None),
+    }
+}
+
+/// Set `value` at a dotted path (`scaling_config.desired_size`, `scaling_config[0].desired_size`).
+/// Stepping through a list with no index takes its first element: Terraform renders a block as a
+/// one-element list, which is how the models read it (`helios_models::number_at`).
+fn set_path(
+    attrs: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let parts: Vec<&str> = key.split('.').collect();
+    let (last, parents) = parts.split_last().expect("split yields one part");
+    let mut obj = attrs;
+    for part in parents {
+        let (name, index) = segment(part);
+        let mut v = obj
+            .get_mut(name)
+            .ok_or_else(|| format!("`{name}` does not exist"))?;
+        if let serde_json::Value::Array(items) = v {
+            v = items
+                .get_mut(index.unwrap_or(0))
+                .ok_or_else(|| format!("`{part}` has no such element"))?;
+        }
+        obj = v
+            .as_object_mut()
+            .ok_or_else(|| format!("`{part}` is not a block"))?;
+    }
+    let (name, index) = segment(last);
+    match index {
+        None => {
+            obj.insert(name.to_string(), value);
+        }
+        Some(i) => {
+            let slot = obj
+                .get_mut(name)
+                .and_then(|v| v.as_array_mut())
+                .and_then(|a| a.get_mut(i))
+                .ok_or_else(|| format!("`{last}` has no such element"))?;
+            *slot = value;
+        }
+    }
+    Ok(())
 }
 
 /// Load a [`FixProposal`] from a JSON file on disk.
@@ -51,7 +134,7 @@ pub fn load(path: &Path) -> Result<FixProposal, FixError> {
         path: path.to_path_buf(),
         source,
     })?;
-    Ok(serde_json::from_str(&raw)?)
+    Ok(serde_json::from_str(raw.trim_start_matches('\u{feff}'))?)
 }
 
 /// Apply a [`FixProposal`] to a clone of `graph` and return the patched graph.
@@ -74,11 +157,22 @@ pub fn apply_fix(
                     .node_indices()
                     .find(|i| &patched[*i].id == resource_id)
                     .ok_or_else(|| FixError::UnknownResource(resource_id.clone()))?;
+                let root = segment(key.split('.').next().unwrap_or_default()).0;
+                if PLACEMENT_KEYS.contains(&root) {
+                    return Err(FixError::PlacementKey {
+                        resource: resource_id.clone(),
+                        key: key.clone(),
+                    });
+                }
                 let obj = patched[idx]
                     .attrs
                     .as_object_mut()
                     .ok_or_else(|| FixError::AttrsNotObject(resource_id.clone()))?;
-                obj.insert(key.clone(), value.clone());
+                set_path(obj, key, value.clone()).map_err(|why| FixError::Path {
+                    resource: resource_id.clone(),
+                    key: key.clone(),
+                    why,
+                })?;
             }
         }
     }
