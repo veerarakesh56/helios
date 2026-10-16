@@ -198,7 +198,9 @@ Composite action. Inputs: `scenarios-glob`, `fixes-dir`, `terraform-json`,
    `${{ github.action_path }}/bin/helios`.
 3. `action/scripts/run-scenarios.sh` -- loops the glob, writes
    `<stem>.json` per scenario plus `<stem>.verify.txt` if
-   `fixes/<stem>.json` exists.
+   `fixes/<stem>.json` exists. The gate (`fail-on: failures`) judges the
+   real plan's chain only; the verify report is advisory and never passes a
+   scenario, since a fix file edits the in-memory graph, not the Terraform.
 4. `action/scripts/build-comment.sh` -- jq-aggregates the per-scenario
    summaries into one `<details>`-collapsible markdown body marked with
    `<!-- helios-action -->`.

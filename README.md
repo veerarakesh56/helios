@@ -15,8 +15,9 @@ and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/w
 **216 tests (161 Rust, 55 Python), plus 7 for the viewer and 9 for the publish guards.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
-> artifacts are posted, it fails the job when any scenario has failures and no committed fix, its fix
-> does not verify, or it is **inconclusive** (Helios could not evaluate it). The CLI blocks on its own:
+> artifacts are posted, it fails the job when any scenario has failures **on the real plan**, or is
+> **inconclusive** (Helios could not evaluate it). A committed fix file is advisory output only and
+> never passes a scenario: it edits Helios's in-memory graph, not the Terraform. The CLI blocks on its own:
 > `simulate` and `verify` exit 1 on failures (or an error) and **3** when inconclusive.
 
 | | |
@@ -140,7 +141,8 @@ and exits 1.
 ## GitHub Action
 
 [`action/`](./action) is a composite action. It runs every scenario in `fixtures/scenarios/*.yaml`,
-optionally re-runs `helios verify` when a matching `fixes/<scenario>.json` is committed, uploads each
+optionally re-runs `helios verify` when a matching `fixes/<scenario>.json` is committed (shown as
+advisory output: the gate judges the real plan only), uploads each
 `inspect` JSON as a workflow artifact, and posts **one sticky PR comment** summarising the verdict —
 a collapsible `<details>` per scenario. It caches the prebuilt binary on `Cargo.lock` + crate
 sources, so the second run on a PR is fast.
