@@ -78,13 +78,12 @@ For a real run, `uv sync` in `helios-ai/`, then either set `ANTHROPIC_API_KEY`, 
 `helios-ai/README.md`), and run `make demo HELIOS_AI_MOCK=0`. `helios explain` uses `HELIOS_AI_PYTHON` if set, else
 `helios-ai/.venv` when run from the repo root, else `python` on PATH.
 
-**Windows:** the build downloads Z3 and links `libz3.dll`, which is not copied next to `helios.exe`.
-`cargo run -p helios-cli -- …` puts it on PATH for you. To run the binary directly, copy the DLL
-once (Git Bash):
-
-```bash
-cp "$(find target/debug/build -name libz3.dll | head -1)" target/debug/   # or target/release
-```
+**Building needs Z3, pinned by hash.** Run `python scripts/fetch_z3.py` once before `cargo build`
+(`make` targets, CI and the Action do it for you). It downloads the official Z3 4.16.0 release zip,
+refuses it unless its sha256 matches the one pinned in the script, and unpacks the library into
+`target/z3/bin`, which `.cargo/config.toml` points z3-sys at. On Linux and macOS the link is static;
+on **Windows** the binary needs `libz3.dll`, which the script also copies into `target/debug` and
+`target/release`, next to `helios.exe`. (`cargo clean` removes it: run the script again.)
 
 ## Commands
 

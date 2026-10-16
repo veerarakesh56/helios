@@ -38,6 +38,9 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
 
+      - name: Fetch the pinned Z3 (sha256-checked; z3-sys links it)
+        run: python3 scripts/fetch_z3.py
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
@@ -67,8 +70,9 @@ jobs:
     env:
       # Overrides rust-toolchain.toml's `stable` channel.
       RUSTUP_TOOLCHAIN: "1.88"
-      # z3-sys downloads its prebuilt Z3 from GitHub releases; authenticated to dodge the rate limit.
-      GITHUB_TOKEN: ${{ github.token }}
+      # No Z3 needed: `cargo check` does not link. (The GITHUB_TOKEN this job used to set for
+      # z3-sys's gh-release download was never read: z3-sys reads READ_ONLY_GITHUB_TOKEN. Helios
+      # no longer uses gh-release; scripts/fetch_z3.py fetches a sha256-pinned Z3 instead.)
     steps:
       - uses: actions/checkout@v4
 

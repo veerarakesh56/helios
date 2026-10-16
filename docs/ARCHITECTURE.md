@@ -127,8 +127,11 @@ The simulator. Splits across:
   because petgraph encodes `NodeIndex` integers that are unstable across
   builds and meaningless to a viewer.
 
-`z3 0.20` ships as the `gh-release` feature, which bundles a precompiled
-Z3 4.16.0 binary for both Linux and Windows. No system Z3 install needed.
+`z3 0.20` is built WITHOUT its `gh-release` feature (which downloads Z3 at
+build time with no hash check). `scripts/fetch_z3.py` downloads the official
+Z3 4.16.0 release zip, checks it against a pinned sha256, and unpacks the
+link library into `target/z3/bin`; `.cargo/config.toml` hands that to z3-sys
+as `Z3_LIBRARY_PATH_OVERRIDE`. Static on Linux/macOS; `libz3.dll` on Windows.
 
 ### `helios-cli`
 
