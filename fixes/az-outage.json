@@ -1,6 +1,6 @@
 {
   "scenario_name": "lose-us-east-1a",
-  "explanation": "Move every us-east-1a-pinned single-AZ resource to us-east-1b so the AZ outage no longer takes them down. In production you would add new resources in a second AZ via add_resource (deferred to v0.2); for v0.1 the attr move is enough to demonstrate the engine re-verification loop.",
+  "explanation": "A deliberately naive fix: move every us-east-1a-pinned single-AZ resource to us-east-1b. The 1a outage no longer takes them down, but a 1b outage now takes all of them; helios verify re-simulates every zone and rejects it (New failures introduced, exit 1).",
   "edits": [
     {
       "op": "set_attr",

@@ -115,9 +115,13 @@ The simulator. Splits across:
 - `fix.rs` -- `FixProposal { scenario_name, explanation, edits:
   Vec<FixEdit::SetAttr> }`. `apply_fix(graph, fix) -> ResourceGraph`
   clones the petgraph and mutates per-node attrs.
-- `verify.rs` -- `verify(graph, scenario, fix) -> VerifyReport { pre_fix,
-  post_fix, resolved, new_failures, remaining }`. BTreeSet diff over the
-  failure-id sets.
+- `verify.rs` -- `verify(graph, scenarios, fix) -> VerifyReport { scenarios:
+  [ScenarioDiff { pre_fix, post_fix, resolved, new_failures, remaining }] }`.
+  Runs the fix's scenario (it must match `scenario_name`), every other scenario
+  given, and `standard_scenarios` (every zone, region and NAT outage of the
+  graph before and after the fix); BTreeSet diff over the failure-id sets of
+  each. `verdict()`: new failures anywhere > target still failing >
+  inconclusive > resolved.
 - `inspect.rs` -- the `helios inspect` data flatten. Hand-rolled
   `{nodes, edges, scenario, chain}` shape -- not petgraph's native serde,
   because petgraph encodes `NodeIndex` integers that are unstable across
@@ -139,8 +143,10 @@ Six subcommands:
   print or emit the chain. Exits non-zero on any failure.
 - `helios explain` -- read `FailureChain` JSON on stdin, shell out to
   `python -m helios_ai explain` for the markdown narration.
-- `helios verify <tf-json> --scenario <yaml> --fix <json>` -- run the
-  pre/post diff. Exits non-zero if anything still fails.
+- `helios verify <tf-json> --scenario <yaml>... --fix <json> [--json]` --
+  run the pre/post diff for every scenario (see `verify.rs`). Exits 1 if the
+  fix's scenario still fails or any scenario has a new failure, 3 if one
+  cannot be evaluated, 0 only otherwise.
 - `helios inspect <tf-json> --scenario <yaml>` -- emit the combined
   `{scenario, graph, chain}` JSON for the Action and viewer. Always exits
   zero.

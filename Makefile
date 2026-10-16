@@ -24,7 +24,8 @@ demo:
 	cargo run -q -p helios-cli -- simulate fixtures/three-tier-webapp \
 		--scenario fixtures/scenarios/az-outage.yaml --json \
 		| cargo run -q -p helios-cli -- explain
-	cargo run -q -p helios-cli -- verify fixtures/three-tier-webapp \
+	@echo "verify re-simulates every zone: this naive fix moves the damage to us-east-1b and is rejected (exit 1)"
+	-cargo run -q -p helios-cli -- verify fixtures/three-tier-webapp \
 		--scenario fixtures/scenarios/az-outage.yaml \
 		--fix fixes/az-outage.json
 

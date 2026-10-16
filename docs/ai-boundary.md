@@ -44,13 +44,20 @@ graph + scenario -> engine.simulate() -> FailureChain (pre)
         engine.apply_fix(graph, fix) -> graph'
                           |
                           v
-        engine.simulate(graph', scenario) -> FailureChain (post)
+        for EVERY scenario -- the fix's own, every other one given, and
+        every zone, region and NAT outage of the graph:
+            engine.simulate(graph, s) vs engine.simulate(graph', s)
                           |
                           v
-        VerifyReport { resolved, new_failures, remaining }
+        VerifyReport { per scenario: resolved, new_failures, remaining }
 ```
 
-`helios verify` exits non-zero if any post-fix failure remains. The fix is
+`helios verify` exits non-zero if any post-fix failure remains in the fix's
+scenario, or if ANY scenario fails somewhere it did not before (exit 3 if a
+scenario cannot be evaluated). A fix that "resolves" an AZ outage by moving
+everything into the other zone is reported as `New failures introduced` under
+that zone's outage, not as resolved. A fix whose `scenario_name` is not one of
+the scenarios given is rejected. The fix is
 "safe" only because the engine re-ran the same Z3 procedure that found the
 original failure -- not because Claude said so. If Claude hallucinated an
 edit that does not actually fix the chain, the verify step catches it and

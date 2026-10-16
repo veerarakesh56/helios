@@ -140,7 +140,7 @@ fn verify_2a(
     let g =
         from_json(&std::fs::read_to_string(root().join(STATE)).expect("fixture")).expect("parses");
     let s = scenario::load(&root().join("scenarios/az-2a.yaml")).expect("scenario");
-    helios_engine::verify(&g, &s, &fix(edits))
+    helios_engine::verify(&g, &[s], &fix(edits))
 }
 
 #[test]
@@ -157,11 +157,13 @@ fn a_capacity_fix_written_as_a_dotted_path_verifies() {
         }]))
         .unwrap_or_else(|e| panic!("{key}: {e}"));
         assert_eq!(
-            r.resolved,
+            r.target().resolved,
             vec!["aws_eks_node_group.this".to_string()],
             "{key}"
         );
-        assert!(r.new_failures.is_empty(), "{key}");
+        for s in &r.scenarios {
+            assert!(s.new_failures.is_empty(), "{key}: {s:?}");
+        }
     }
 }
 

@@ -6,6 +6,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`helios verify` checks every scenario, not only the fix's.** It re-simulates the fix's scenario,
+  every other `--scenario` given (now repeatable), and every zone, region and NAT-gateway outage of
+  the graph, before and after the fix, and exits 1 on a new failure in ANY of them. The shipped
+  `fixes/az-outage.json` (move every 1a resource to 1b) used to verify as "Resolved 3, exit 0";
+  under a 1b outage it takes 5 resources down instead of 1, and verify now says so. A fix whose
+  `scenario_name` is not one of the scenarios given is rejected. `verify --json` emits the
+  per-scenario report; `VerifyReport` is now `{ scenarios: [ScenarioDiff] }` with `verdict()`.
+
 ## [0.2.0] - 2026-09-26
 
 ### Added

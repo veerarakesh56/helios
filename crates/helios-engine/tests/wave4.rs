@@ -173,9 +173,14 @@ fn capacity_fix_verifies(id: &str, key: &str, one: serde_json::Value, two: serde
     for zone in ["ap-south-2a", "ap-south-2b"] {
         assert!(down(&g, &az(zone)).contains(id), "{id} survives {zone}");
     }
-    let report = verify(&g, &az("ap-south-2a"), &fix(id, key, two)).unwrap();
-    assert!(report.resolved.contains(&id.to_string()), "{report:?}");
-    assert!(report.new_failures.is_empty());
+    let report = verify(&g, &[az("ap-south-2a")], &fix(id, key, two)).unwrap();
+    assert!(
+        report.target().resolved.contains(&id.to_string()),
+        "{report:?}"
+    );
+    for s in &report.scenarios {
+        assert!(s.new_failures.is_empty(), "{s:?}");
+    }
 }
 
 #[test]
