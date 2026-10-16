@@ -3,6 +3,8 @@
     python scripts/scrub_tfjson.py plan.json > fixtures/<name>/terraform-show.json
     python scripts/check_publishable.py --dir fixtures/<name>   # then check it
 
+The input must lie inside the working directory (or come on stdin as `-`).
+
 Real Terraform JSON carries every `sensitive` value in plaintext (database passwords,
 `random_password.result`), environment variables, the account id in every ARN, and public IPs.
 This keeps ONLY:
@@ -27,6 +29,7 @@ Stdlib only.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from typing import Any
@@ -219,6 +222,19 @@ def scrub(doc: dict) -> dict:
     return Scrubber().strings(out)
 
 
+def inside_cwd(arg: str) -> str:
+    """The real path of `arg` when it lies inside the working directory; else ValueError.
+
+    The input path may come from an agent's command line: without this, `../../` or an absolute
+    path would read (and print, scrubbed or not) any JSON file the user can read."""
+    base = os.path.realpath(os.getcwd())
+    path = os.path.realpath(arg)
+    if os.path.commonpath([base, path]) != base:
+        raise ValueError(f"{arg} is outside the working directory {base}; run from its folder, "
+                         "or pipe it in with `-`")
+    return path
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -226,7 +242,12 @@ def main() -> int:
     if sys.argv[1] == "-":
         doc = json.load(sys.stdin)
     else:
-        with open(sys.argv[1], encoding="utf-8") as f:
+        try:
+            path = inside_cwd(sys.argv[1])
+        except ValueError as e:
+            print(f"scrub_tfjson: {e}", file=sys.stderr)
+            return 2
+        with open(path, encoding="utf-8") as f:
             doc = json.load(f)
     sys.stdout.reconfigure(encoding="utf-8")
     json.dump(scrub(doc), sys.stdout, indent=2, ensure_ascii=False)

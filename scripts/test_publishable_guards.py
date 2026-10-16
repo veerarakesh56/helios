@@ -9,7 +9,10 @@ scrubber tested against text that does not look like a secret proves nothing.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import re
 import pathlib
 import sys
@@ -137,6 +140,46 @@ class ScrubTfjson(unittest.TestCase):
         self.assertEqual(cfg["aws_db_instance.db"]["expressions"],
                          {"db_subnet_group_name": {"references": ["aws_db_subnet_group.db.name"]}})
         self.assertNotIn("random_password.db", cfg)
+
+
+class ScrubReadsOnlyInsideCwd(unittest.TestCase):
+    """The input path can come from an agent: a path out of the working directory is refused."""
+
+    def _main(self, cwd: pathlib.Path, arg: str) -> tuple[int, str]:
+        # A real text stream: main() reconfigures stdout to UTF-8, which a StringIO cannot do.
+        old_cwd, old_argv, out = os.getcwd(), sys.argv, io.TextIOWrapper(io.BytesIO())
+        try:
+            os.chdir(cwd)
+            sys.argv = ["scrub_tfjson.py", arg]
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = scrub_tfjson.main()
+            out.flush()
+            return code, out.buffer.getvalue().decode("utf-8")
+        finally:
+            os.chdir(old_cwd)
+            sys.argv = old_argv
+
+    def test_inside_is_read_outside_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            work, outside = pathlib.Path(d, "work"), pathlib.Path(d, "secret.json")
+            sibling = pathlib.Path(d, "work-other", "secret.json")  # shares work's prefix
+            sibling.parent.mkdir(parents=True)
+            work.mkdir()
+            (work / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
+            for p in (outside, sibling):
+                p.write_text(json.dumps(PLAN), encoding="utf-8")
+            code, out = self._main(work, "plan.json")
+            self.assertEqual(code, 0)
+            self.assertIn("aws_vpc.main", out)
+            refused = ["../secret.json", str(outside), "sub/../../secret.json",
+                       "../work-other/secret.json"]
+            try:  # a link inside the folder to a file outside it (needs privilege on Windows)
+                (work / "link.json").symlink_to(outside)
+                refused.append("link.json")
+            except OSError:
+                pass
+            for arg in refused:
+                self.assertEqual(self._main(work, arg), (2, ""), arg)
 
 
 class ScrubKeepsWhatHeliosReads(unittest.TestCase):
