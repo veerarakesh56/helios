@@ -15,6 +15,53 @@ struct Cli {
 
     #[arg(long, global = true, default_value = "info")]
     log_level: String,
+
+    /// Exit 3 (inconclusive) when the input has resources of types Helios does not model. Off by
+    /// default: they are skipped, counted on stderr and listed under `skipped` in JSON output.
+    #[arg(long, global = true)]
+    fail_on_unsupported: bool,
+}
+
+/// `--fail-on-unsupported`, set once in `main`.
+static FAIL_ON_UNSUPPORTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// [`helios_graph::load_full`], saying on stderr -- whatever the log level -- how many resources
+/// were NOT simulated, and exiting [`EXIT_INCONCLUSIVE`] for them under `--fail-on-unsupported`.
+fn load(input: &std::path::Path) -> Result<helios_graph::Loaded> {
+    let loaded = helios_graph::load_full(input)?;
+    let n: usize = loaded.skipped.iter().map(|s| s.count).sum();
+    if n > 0 {
+        eprintln!(
+            "helios: NOT SIMULATED: {n} resource(s) of {} unsupported type(s), next to {} \
+             modelled -- they are absent from the graph, not assumed healthy (listed under \
+             `skipped` in JSON output)",
+            loaded.skipped.len(),
+            loaded.graph.node_count()
+        );
+        if FAIL_ON_UNSUPPORTED.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "helios: INCONCLUSIVE (not a pass): --fail-on-unsupported and {n} resource(s) \
+                 cannot be simulated"
+            );
+            std::process::exit(EXIT_INCONCLUSIVE);
+        }
+    }
+    Ok(loaded)
+}
+
+/// A JSON document with the input's `skipped` list appended, field order kept.
+#[derive(serde::Serialize)]
+struct WithSkipped<'a, T: serde::Serialize> {
+    #[serde(flatten)]
+    doc: &'a T,
+    skipped: &'a [helios_graph::Skipped],
+}
+
+fn print_json<T: serde::Serialize>(doc: &T, skipped: &[helios_graph::Skipped]) -> Result<()> {
+    serde_json::to_writer_pretty(std::io::stdout().lock(), &WithSkipped { doc, skipped })?;
+    println!();
+    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -86,6 +133,10 @@ fn main() -> Result<()> {
         .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(tracing_subscriber::EnvFilter::new(&cli.log_level))
         .init();
+    FAIL_ON_UNSUPPORTED.store(
+        cli.fail_on_unsupported,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     match cli.command {
         Command::Plan { input } => cmd_plan(&input),
@@ -108,24 +159,27 @@ fn main() -> Result<()> {
 }
 
 fn cmd_plan(input: &std::path::Path) -> Result<()> {
-    let (graph, source) = helios_graph::load_with_source(input)?;
-    println!("source: {source}");
+    let loaded = load(input)?;
+    println!("source: {}", loaded.source);
     println!(
         "loaded {} resources, {} dependency edges",
-        graph.node_count(),
-        graph.edge_count()
+        loaded.graph.node_count(),
+        loaded.graph.edge_count()
     );
+    let skipped: usize = loaded.skipped.iter().map(|s| s.count).sum();
+    if skipped > 0 {
+        println!("skipped {skipped} resources of unsupported types (not simulated)");
+    }
     Ok(())
 }
 
 fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let loaded = load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
-    let chain = simulate(&graph, &scenario)?;
+    let chain = simulate(&loaded.graph, &scenario)?;
     if json {
-        serde_json::to_writer_pretty(std::io::stdout().lock(), &chain)?;
-        println!();
+        print_json(&chain, &loaded.skipped)?;
     } else {
         print!("{}", chain.render_plain());
     }
@@ -141,14 +195,15 @@ fn cmd_verify(
     fix: &std::path::Path,
     json: bool,
 ) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let loaded = load(input)?;
+    let graph = &loaded.graph;
     let scenarios = scenarios
         .iter()
         .map(|p| helios_engine::scenario::load(p))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let fix = helios_engine::fix::load(fix).map_err(|e| anyhow::anyhow!("loading fix: {e}"))?;
-    let report = helios_engine::verify(&graph, &scenarios, &fix).map_err(|e| {
+    let report = helios_engine::verify(graph, &scenarios, &fix).map_err(|e| {
         if let helios_engine::VerifyError::Simulate(inner) = &e {
             exit_if_inconclusive(inner);
         }
@@ -162,8 +217,7 @@ fn cmd_verify(
             "verdict": verdict,
             "scenarios": report.scenarios,
         });
-        serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
-        println!();
+        print_json(&doc, &loaded.skipped)?;
     } else {
         print!("{}", render_verify(&report));
     }
@@ -242,18 +296,16 @@ fn render_verify(report: &helios_engine::VerifyReport) -> String {
 }
 
 fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let loaded = load(input)?;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
-    let chain = simulate(&graph, &scenario)?;
-    let doc = helios_engine::build_inspect(&graph, chain);
-    serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
-    println!();
-    Ok(())
+    let chain = simulate(&loaded.graph, &scenario)?;
+    let doc = helios_engine::build_inspect(&loaded.graph, chain);
+    print_json(&doc, &loaded.skipped)
 }
 
 fn cmd_scenarios(input: &std::path::Path, out: &std::path::Path) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let graph = load(input)?.graph;
     let scenarios = helios_engine::standard_scenarios(&[&graph]);
     if scenarios.is_empty() {
         anyhow::bail!(
@@ -312,7 +364,7 @@ fn cmd_explain() -> Result<()> {
 /// Simulate, then pipe `{chain, attrs_snapshot}` to `python -m helios_ai propose-fix`, whose
 /// FixProposal JSON goes straight to stdout.
 fn cmd_propose_fix(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {
-    let graph = helios_graph::load(input)?;
+    let graph = load(input)?.graph;
     let scenario = helios_engine::scenario::load(scenario)
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let chain = simulate(&graph, &scenario)?;

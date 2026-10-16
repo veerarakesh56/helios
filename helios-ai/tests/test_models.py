@@ -52,6 +52,18 @@ def test_inspect_doc_round_trips_real_rust_output() -> None:
     assert redumped == raw
 
 
+def test_skipped_resources_from_simulate_json_are_accepted() -> None:
+    """`helios simulate --json` lists unsupported resources; `helios explain` must still read it."""
+    raw = {
+        "scenario": "s",
+        "failures": [],
+        "skipped": [{"type": "aws_sns_topic", "count": 1, "addresses": ["aws_sns_topic.t"]}],
+    }
+    chain = FailureChain.model_validate(raw)
+    assert chain.skipped[0].type == "aws_sns_topic"
+    assert chain.model_dump() == raw
+
+
 def test_dep_doc_accepts_spread_and_rejects_unknown_kinds() -> None:
     from pydantic import ValidationError
 

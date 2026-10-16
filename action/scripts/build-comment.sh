@@ -21,6 +21,18 @@ artifact_url="$SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID#artifacts"
 } > "$COMMENT_PATH"
 
 shopt -s nullglob
+# Every inspect JSON is of the same input: the first one says what was NOT simulated.
+inspects=( "$ARTIFACT_DIR"/*.json )
+if [[ ${#inspects[@]} -gt 0 ]]; then
+  skipped=$(jq '[.skipped[]?.count] | add // 0' "${inspects[0]}")
+  if [[ "$skipped" -gt 0 ]]; then
+    {
+      echo "> ⚠️ **$skipped resource(s) of unsupported types were NOT simulated** — absent from the graph, not assumed healthy:"
+      echo "> $(jq -r '[.skipped[] | "`\(.type)` (\(.count))"] | join(", ")' "${inspects[0]}")"
+      echo
+    } >> "$COMMENT_PATH"
+  fi
+fi
 for inspect_json in "$ARTIFACT_DIR"/*.json; do
   stem="$(basename "$inspect_json" .json)"
   failure_count=$(jq '.chain.failures | length' "$inspect_json")

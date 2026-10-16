@@ -195,5 +195,6 @@
         "reason": "single-AZ in us-east-1a, which is down"
       }
     ]
-  }
+  },
+  "skipped": []
 }

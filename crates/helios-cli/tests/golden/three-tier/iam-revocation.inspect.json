@@ -185,5 +185,6 @@
         "reason": "principal arn:aws:iam::123456789012:role/lambda-worker was revoked"
       }
     ]
-  }
+  },
+  "skipped": []
 }

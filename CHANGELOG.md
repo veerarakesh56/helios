@@ -29,6 +29,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   written by the new `helios scenarios <tf-json> --out <dir>`. A CI job (`action-consumer`) runs the
   action from a separate directory with only `terraform-json` set.
 
+- **Unsupported resources are no longer skipped quietly.** `simulate --json`, `inspect` and
+  `verify --json` append `skipped: [{type, count, addresses}]`; every command prints
+  `helios: NOT SIMULATED: N resource(s) ...` on stderr whatever the log level; `plan` prints the
+  count; the Action's comment shows it. New global `--fail-on-unsupported` exits 3 (inconclusive)
+  when there are any; the default is unchanged. The three-tier golden outputs gain
+  `"skipped": []`; helios-ai's `FailureChain` accepts the field (`ChainDoc` is the inspect chain).
+
 ### Security
 
 - **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at

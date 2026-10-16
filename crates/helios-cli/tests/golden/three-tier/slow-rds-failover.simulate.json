@@ -6,5 +6,6 @@
       "kind": "DbInstance",
       "reason": "RDS aws_db_instance.primary failover window exceeded SLO — treated as unavailable"
     }
-  ]
+  ],
+  "skipped": []
 }

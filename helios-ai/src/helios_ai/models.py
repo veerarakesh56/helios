@@ -22,11 +22,29 @@ class FailedResource(BaseModel):
     reason: str
 
 
-class FailureChain(BaseModel):
+class Skipped(BaseModel):
+    """Resources of one type Helios does not model: absent from the graph, NOT assumed healthy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    count: int
+    addresses: list[str]
+
+
+class ChainDoc(BaseModel):
+    """The Rust `FailureChain` exactly, as nested in `helios inspect` output."""
+
     model_config = ConfigDict(extra="forbid")
 
     scenario: str
     failures: list[FailedResource]
+
+
+class FailureChain(ChainDoc):
+    """`helios simulate --json` output: the chain plus the input's unsupported resources."""
+
+    skipped: list[Skipped] = Field(default_factory=list)
 
 
 class FixEdit(BaseModel):
@@ -100,4 +118,5 @@ class InspectDoc(BaseModel):
 
     scenario: str
     graph: GraphDoc
-    chain: FailureChain
+    chain: ChainDoc
+    skipped: list[Skipped] = Field(default_factory=list)
