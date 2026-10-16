@@ -44,6 +44,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   markdown-escaped in table cells; captured verify/inconclusive text is a `<pre>` block, not a
   ``` fence its content could close.
 
+- **Every GitHub Action is pinned to a full commit SHA** (tag in a comment, resolved 2026-10-16;
+  each is the commit its major tag pointed at, so behaviour is unchanged). `dtolnay/rust-toolchain`
+  now names its `toolchain:` explicitly, as a SHA ref requires. `scripts/test_action_pins.py` fails
+  on any unpinned `uses:`.
+
 ### Changed
 
 - The default model is `claude-opus-5-5` (was `claude-opus-5`).
