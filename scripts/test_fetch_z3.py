@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 import pathlib
+import platform
 import sys
 import tempfile
 import unittest
@@ -47,6 +48,19 @@ class FetchZ3(unittest.TestCase):
             self.assertEqual(written, ["libz3.a"])
             files = sorted(p.relative_to(d).as_posix() for p in pathlib.Path(d).rglob("*"))
             self.assertEqual(files, ["bin", "bin/libz3.a"])
+
+    def test_an_already_fetched_z3_still_puts_the_dll_back_in_cleaned_profiles(self):
+        key = (platform.system(), platform.machine())
+        if key not in fetch_z3.PINNED:
+            self.skipTest(f"no pin for {key}")
+        with tempfile.TemporaryDirectory() as d:
+            dest = pathlib.Path(d) / "target" / "z3"
+            (dest / "bin").mkdir(parents=True)
+            (dest / "bin" / "libz3.dll").write_bytes(b"dll")
+            (dest / "PINNED").write_text(fetch_z3.PINNED[key][1] + "\n")
+            self.assertEqual(fetch_z3.main(["--dest", str(dest)]), 0)  # no download: stamp matches
+            for profile in ("debug", "release"):
+                self.assertEqual((dest.parent / profile / "libz3.dll").read_bytes(), b"dll")
 
     def test_every_pin_is_a_4_16_0_zip_with_a_sha256(self):
         for key in [("Linux", "x86_64"), ("Windows", "AMD64")]:

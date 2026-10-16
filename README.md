@@ -12,7 +12,7 @@
 **Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
 *or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
 and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
-**226 tests (170 Rust, 56 Python), plus 7 for the viewer and 20 for the repository scripts.**
+**226 tests (170 Rust, 56 Python), plus 7 for the viewer and 21 for the repository scripts.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
 > artifacts are posted, it fails the job when any scenario has failures **on the real plan**, or is
@@ -194,7 +194,7 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**226 tests (plus 7 for the web viewer and 20 for the scripts in `scripts/`):**
+**226 tests (plus 7 for the web viewer and 21 for the scripts in `scripts/`):**
 
 | | |
 |---|---|
