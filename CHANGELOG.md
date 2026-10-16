@@ -38,6 +38,16 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **The PR comment escapes what the PR controls.** Scenario names, file stems, resource ids, kinds
+  and reasons went into the comment's markdown/HTML raw (a `|` broke the table; `<`, backticks or a
+  newline could inject markup). They are now HTML-escaped in `<summary>`/`<pre>` and
+  markdown-escaped in table cells; captured verify/inconclusive text is a `<pre>` block, not a
+  ``` fence its content could close.
+
+### Changed
+
+- The default model is `claude-opus-5-5` (was `claude-opus-5`).
+
 - **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
   build time with no hash check (still true of z3-sys 0.13.1, checked 2026-10-16). Helios drops the
   feature: `scripts/fetch_z3.py` downloads the official Z3 4.16.0 release zip, refuses it unless its
