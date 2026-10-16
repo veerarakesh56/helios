@@ -8,8 +8,10 @@ without them the tests skip locally and FAIL in CI (`CI` set), so they cannot pa
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -79,6 +81,48 @@ class GateJudgesThePlan(unittest.TestCase):
     def test_a_clean_plan_passes(self):
         gate, _ = self.run_gate("[]", with_fix=True)
         self.assertEqual(gate, [])
+
+
+COMMENT = ROOT / "action" / "scripts" / "build-comment.sh"
+
+
+@unittest.skipIf(MISSING and not os.environ.get("CI"), f"needs {', '.join(MISSING)}")
+class CommentEscapesWhatThePrControls(unittest.TestCase):
+    def test_names_ids_and_reasons_cannot_inject_markup(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        art = tmp / "art"
+        art.mkdir()
+        evil = '<img src=x onerror=alert(1)>'
+        doc = {
+            "chain": {
+                "scenario": f"s</code></summary>{evil}",
+                "failures": [{"id": "aws_x.a|b`c", "kind": "K*", "reason": f"r\n# {evil} | x"}],
+            },
+            "skipped": [{"type": f"t{evil}", "count": 1, "addresses": ["t.a"]}],
+        }
+        (art / "az.json").write_text(json.dumps(doc))
+        (art / "az.verify.txt").write_text(f"```\n{evil}\n")
+        (art / "nat.inconclusive.txt").write_text(f"helios: INCONCLUSIVE {evil}\n")
+        out = tmp / "c.md"
+        env = {
+            **os.environ, "ARTIFACT_DIR": art.as_posix(), "COMMENT_PATH": out.as_posix(),
+            "ARTIFACT_NAME": "a", "RUN_ID": "1", "SERVER_URL": "https://github.com",
+            "REPOSITORY": "o/r", "GITHUB_OUTPUT": (tmp / "gh-output").as_posix(),
+        }
+        r = subprocess.run([BASH or "bash", COMMENT.as_posix()], env=env, capture_output=True,
+                           encoding="utf-8", errors="replace", check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        body = out.read_text(encoding="utf-8")
+        self.assertNotIn("<img", body)
+        self.assertNotIn("</code></summary><", body)
+        outside_pre = re.sub(r"<pre>.*?</pre>", "", body, flags=re.S)
+        self.assertNotIn("```", outside_pre, "captured text must stay inside <pre>")
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", body)
+        [row] = [line for line in body.splitlines() if line.startswith("| aws")]
+        unescaped = len(re.findall(r"(?<!\\)\|", row))
+        self.assertEqual(unescaped, 4, row)
+        self.assertIn(r"aws\_x.a\|b\`c", row)
 
 
 if __name__ == "__main__":

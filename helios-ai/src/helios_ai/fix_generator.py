@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from .glossary import AVAILABILITY_MODEL_GLOSSARY
 from .models import FailureChain, FixProposal
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 MAX_TOKENS = 16000
 
 

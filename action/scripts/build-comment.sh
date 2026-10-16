@@ -9,6 +9,15 @@
 # Output (GHA step): body-path = $COMMENT_PATH
 set -euo pipefail
 
+# Scenario names, stems, resource ids, kinds and reasons come from the PR (its plan, its scenario
+# files), so none goes into the comment raw. `html`: for HTML contexts (<summary>, <pre>). `md`: for
+# markdown text and table cells -- also one line, and markdown's specials (| ` * _ [ ] ...) escaped.
+JQ_ESC='def html: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+def md: html | gsub("[\r\n]+"; " ") | gsub("(?<c>[\\\\`*_{}\\[\\]()#+!|~])"; "\\\(.c)");'
+html() { jq -rn --arg s "$1" "$JQ_ESC"' $s | html'; }
+# A captured text file as a <pre> block: no ``` fence for its content to close.
+pre() { echo "<pre>"; jq -Rr "$JQ_ESC"' html' "$1"; echo "</pre>"; }
+
 artifact_url="$SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID#artifacts"
 
 {
@@ -28,29 +37,30 @@ if [[ ${#inspects[@]} -gt 0 ]]; then
   if [[ "$skipped" -gt 0 ]]; then
     {
       echo "> ⚠️ **$skipped resource(s) of unsupported types were NOT simulated** — absent from the graph, not assumed healthy:"
-      echo "> $(jq -r '[.skipped[] | "`\(.type)` (\(.count))"] | join(", ")' "${inspects[0]}")"
+      echo "> $(jq -r "$JQ_ESC"' [.skipped[] | "\(.type | md) (\(.count))"] | join(", ")' "${inspects[0]}")"
       echo
     } >> "$COMMENT_PATH"
   fi
 fi
 for inspect_json in "$ARTIFACT_DIR"/*.json; do
   stem="$(basename "$inspect_json" .json)"
+  stem_html="$(html "$stem")"
   failure_count=$(jq '.chain.failures | length' "$inspect_json")
-  scenario_label=$(jq -r '.chain.scenario' "$inspect_json")
+  scenario_label=$(jq -r "$JQ_ESC"' .chain.scenario | html' "$inspect_json")
 
   {
     echo "<details>"
     if [[ "$failure_count" -eq 0 ]]; then
-      echo "<summary><strong>$stem</strong> — ✅ no failures (\`$scenario_label\`)</summary>"
+      echo "<summary><strong>$stem_html</strong> — ✅ no failures (<code>$scenario_label</code>)</summary>"
     else
-      echo "<summary><strong>$stem</strong> — ❌ $failure_count failure(s) (\`$scenario_label\`)</summary>"
+      echo "<summary><strong>$stem_html</strong> — ❌ $failure_count failure(s) (<code>$scenario_label</code>)</summary>"
     fi
     echo
     if [[ "$failure_count" -gt 0 ]]; then
       echo
       echo "| Resource | Kind | Reason |"
       echo "|---|---|---|"
-      jq -r '.chain.failures[:3][] | "| `\(.id)` | \(.kind) | \(.reason) |"' "$inspect_json"
+      jq -r "$JQ_ESC"' .chain.failures[:3][] | "| \(.id | md) | \(.kind | md) | \(.reason | md) |"' "$inspect_json"
       if [[ "$failure_count" -gt 3 ]]; then
         echo
         echo "_…and $((failure_count - 3)) more in the artifact._"
@@ -60,11 +70,9 @@ for inspect_json in "$ARTIFACT_DIR"/*.json; do
     verify_txt="$ARTIFACT_DIR/$stem.verify.txt"
     if [[ -f "$verify_txt" ]]; then
       echo
-      echo "**Advisory — proposed fix \`fixes/$stem.json\` re-simulated in memory.** It does not change your Terraform and never passes this scenario: make the change in the Terraform and the next run judges the real plan."
+      echo "<p><strong>Advisory — proposed fix <code>fixes/$stem_html.json</code> re-simulated in memory.</strong> It does not change your Terraform and never passes this scenario: make the change in the Terraform and the next run judges the real plan.</p>"
       echo
-      echo '```'
-      cat "$verify_txt"
-      echo '```'
+      pre "$verify_txt"
     fi
     echo
     echo "</details>"
@@ -75,11 +83,9 @@ for inconclusive in "$ARTIFACT_DIR"/*.inconclusive.txt; do
   stem="$(basename "$inconclusive" .inconclusive.txt)"
   {
     echo "<details open>"
-    echo "<summary><strong>$stem</strong> — ⚠️ inconclusive: Helios cannot evaluate this scenario (not a pass)</summary>"
+    echo "<summary><strong>$(html "$stem")</strong> — ⚠️ inconclusive: Helios cannot evaluate this scenario (not a pass)</summary>"
     echo
-    echo '```'
-    cat "$inconclusive"
-    echo '```'
+    pre "$inconclusive"
     echo
     echo "</details>"
     echo

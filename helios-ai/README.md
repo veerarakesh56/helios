@@ -30,7 +30,7 @@ Or go through the Rust wrapper, which finds `helios-ai/.venv` from the repo root
     helios simulate ./infra --scenario scenarios/az-outage.yaml --json \
       | HELIOS_AI_PROVIDER=claude_cli uv run python -m helios_ai explain
 
-`HELIOS_AI_MODEL` (default `claude-opus-5`, which CLI 2.1.283 accepts; `opus` also works) and
+`HELIOS_AI_MODEL` (default `claude-opus-5-5`; `opus` also works) and
 `HELIOS_AI_TIMEOUT` (seconds per CLI call, default 300) apply.
 
 What `claude_cli` does differently, all in `src/helios_ai/_claude_cli.py`:
