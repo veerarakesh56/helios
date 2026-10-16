@@ -647,6 +647,7 @@ fn three_tier_outputs_are_byte_identical() {
         "az-outage",
         "iam-revocation",
         "region-outage",
+        "resource-loss",
         "single-nat-death",
         "slow-rds-failover",
     ] {

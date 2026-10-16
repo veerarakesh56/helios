@@ -51,6 +51,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **README counts are derived and held.** The header said 216 tests (161 Rust / 55 Python / 9
+  guards) while the Tests section said 200 (148 / 52 / 7); "Five kinds ship" sat beside 6 scenario
+  kinds, and no `resource-loss` example shipped. Both now state the real counts (224: 168 Rust, 56
+  Python; 7 viewer; 20 scripts), the scenario table lists all six kinds,
+  `fixtures/scenarios/resource-loss.yaml` ships (with three-tier goldens), and
+  `scripts/test_readme_counts.py` fails when a count, the kind count, a kind's table row or its
+  example file drifts.
 - **web/ dev dependencies upgraded** to clear `npm audit` (14 findings, 2 critical, 7 high, all
   dev-only, via vite 5 / vitest 2): vite 8.3, vitest 5.0, @vitejs/plugin-react 6.1, jsdom 29.
   `npm audit` reports 0. CI's web job runs Node 22 (vitest 5 requires ^22.12).
