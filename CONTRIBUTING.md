@@ -45,7 +45,7 @@ your first PR" section that goes deeper.
 
 - Rust stable (pinned in `rust-toolchain.toml`).
 - Python 3.12 with `uv` (`helios-ai/.venv/`).
-- Node 20 with `npm` (only needed for `web/` work).
+- Node 22 (>= 22.13) with `npm` (only needed for `web/` work).
 - Optional: `make` for the convenience targets (`make demo`, `make check`,
   `make test`, `make fmt`).
 
