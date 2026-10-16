@@ -86,6 +86,16 @@ def unpack(data: bytes, dest: pathlib.Path) -> list[str]:
     return sorted(written)
 
 
+def copy_dll(dest: pathlib.Path) -> None:
+    """Windows: put the unpacked libz3.dll next to the debug and release binaries."""
+    dll = dest / "bin" / "libz3.dll"
+    if not dll.is_file():
+        return
+    for profile in ("debug", "release"):
+        (dest.parent / profile).mkdir(parents=True, exist_ok=True)
+        (dest.parent / profile / "libz3.dll").write_bytes(dll.read_bytes())
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dest", type=pathlib.Path, default=DEFAULT_DEST)
@@ -98,17 +108,15 @@ def main(argv: list[str] | None = None) -> int:
     asset, sha = PINNED[key]
     stamp = args.dest / "PINNED"
     if stamp.is_file() and stamp.read_text().strip() == sha:
+        # A profile dir may have been cleaned on its own: put the DLL back.
+        copy_dll(args.dest)
         print(f"Z3 {VERSION} ({asset}, sha256 {sha}) already in {args.dest}")
         return 0
     with urllib.request.urlopen(BASE + asset, timeout=300) as r:  # noqa: S310 (constant https URL)
         data = r.read()
     check_sha256(data, sha, asset)
     files = unpack(data, args.dest)
-    if "libz3.dll" in files:
-        for profile in ("debug", "release"):
-            (args.dest.parent / profile).mkdir(parents=True, exist_ok=True)
-            dll = (args.dest / "bin" / "libz3.dll").read_bytes()
-            (args.dest.parent / profile / "libz3.dll").write_bytes(dll)
+    copy_dll(args.dest)
     stamp.write_text(sha + "\n")
     print(f"Z3 {VERSION}: {asset} sha256 OK, unpacked {', '.join(files)} to {args.dest / 'bin'}")
     return 0
