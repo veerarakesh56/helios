@@ -10,9 +10,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# Read-only by default; only the two jobs that run the Action (it posts the sticky PR comment)
+# get pull-requests: write.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   check:
@@ -21,6 +22,8 @@ jobs:
     env:
       # The Python e2e tests in crates/helios-cli/tests/cli.rs fail (not skip) without the venv.
       HELIOS_REQUIRE_PY: "1"
+      # helios_ai itself is not installed (see the sync step): the venv python finds it here.
+      PYTHONPATH: ${{ github.workspace }}/helios-ai/src
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -47,8 +50,10 @@ jobs:
         with:
           version: "0.8.x"
 
+      # Locked wheels only, no build: no dependency's setup code runs, and helios-ai is not built
+      # either (its build backend is not in uv.lock). PYTHONPATH above puts its source on the path.
       - name: Sync helios-ai venv (needed by the Rust e2e pipe test)
-        run: uv sync --frozen
+        run: uv sync --frozen --no-build --no-install-project
         working-directory: helios-ai
 
       - name: cargo fmt --check
@@ -94,6 +99,8 @@ jobs:
     defaults:
       run:
         working-directory: helios-ai
+    env:
+      PYTHONPATH: ${{ github.workspace }}/helios-ai/src
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -102,14 +109,16 @@ jobs:
         with:
           version: "0.8.x"
 
+      # As in `check`: locked wheels, nothing built. The tools then run from the venv directly
+      # (`uv run` would sync again, and build the project).
       - name: Sync dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-build --no-install-project
 
       - name: ruff check
-        run: uv run ruff check
+        run: .venv/bin/ruff check
 
       - name: pytest
-        run: uv run pytest -v
+        run: .venv/bin/python -m pytest -v
 
   web-check:
     name: web / build / vitest
@@ -128,8 +137,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # No lifecycle scripts: the lock's only install script is fsevents (macOS-only).
       - name: npm ci
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: vitest
         run: npm run test
@@ -141,6 +151,9 @@ jobs:
     name: action / smoke (inspect + comment body)
     runs-on: ubuntu-latest
     needs: check
+    permissions:
+      contents: read
+      pull-requests: write # the Action posts its sticky PR comment
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -244,6 +257,9 @@ jobs:
     name: action / as a consumer repository uses it
     runs-on: ubuntu-latest
     needs: check
+    permissions:
+      contents: read
+      pull-requests: write # the Action posts its sticky PR comment
     steps:
       - name: Check out Helios OUTSIDE the consumer's root
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

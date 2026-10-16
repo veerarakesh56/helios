@@ -6,6 +6,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **`scripts/scrub_tfjson.py` reads only inside the working directory.** Its input path can come
+  from an agent's command line; `../` or an absolute path used to read any JSON file the user
+  could. A path that resolves (symlinks included) outside the working directory is refused, exit 2;
+  stdin (`-`) is unchanged.
+- **CI installs nothing that runs setup code.** `uv sync --frozen --no-build --no-install-project`
+  (locked wheels only; helios-ai is put on `PYTHONPATH` rather than built with an unlocked
+  hatchling), ruff and pytest run from the venv instead of `uv run`, `npm ci --ignore-scripts`,
+  and `pull-requests: write` is granted only to the two jobs that run the Action.
+- **`.sonarcloud.properties` excludes `fixtures/`** from SonarQube Cloud analysis: deliberately
+  weak test infrastructure that the simulator and golden tests depend on, not product code.
+
 ### Fixed
 
 - **`helios verify` checks every scenario, not only the fix's.** It re-simulates the fix's scenario,
