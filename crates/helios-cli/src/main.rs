@@ -314,17 +314,47 @@ fn cmd_scenarios(input: &std::path::Path, out: &std::path::Path) -> Result<()> {
         );
     }
     std::fs::create_dir_all(out)?;
-    for s in scenarios {
-        let stem: String = s
-            .name
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
+    let names: Vec<&str> = scenarios.iter().map(|s| s.name.as_str()).collect();
+    for (s, stem) in scenarios.iter().zip(scenario_stems(&names)) {
         let path = out.join(format!("{stem}.yaml"));
-        std::fs::write(&path, serde_yaml_ng::to_string(&s)?)?;
+        std::fs::write(&path, serde_yaml_ng::to_string(s)?)?;
         println!("{}", path.display());
     }
     Ok(())
+}
+
+/// File stems for scenario names: non-alphanumerics become `-`. Names that would share a stem
+/// (`aws_nat_gateway.a_b` / `aws_nat_gateway.a-b`) all get `-<FNV-1a of the full name>` appended,
+/// so no file overwrites another and a stem does not depend on which name came first.
+fn scenario_stems(names: &[&str]) -> Vec<String> {
+    let plain = |n: &str| -> String {
+        n.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    };
+    let fnv = |n: &str| {
+        n.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    };
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    for n in names {
+        *seen.entry(plain(n)).or_default() += 1;
+    }
+    let stems: Vec<String> = names
+        .iter()
+        .map(|n| match plain(n) {
+            p if seen[&p] > 1 => format!("{p}-{:016x}", fnv(n)),
+            p => p,
+        })
+        .collect();
+    let unique: std::collections::HashSet<&String> = stems.iter().collect();
+    assert_eq!(
+        unique.len(),
+        stems.len(),
+        "scenario file stems collide: {stems:?}"
+    );
+    stems
 }
 
 /// Exit code for a scenario Helios cannot evaluate: distinct from 0 (resilient) and 1 (failures,
@@ -449,6 +479,31 @@ fn run_helios_ai(sub: &str, stdin: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scenario_stems_never_collide() {
+        let names = [
+            "single-nat-death aws_nat_gateway.a_b",
+            "single-nat-death aws_nat_gateway.a-b",
+            r#"single-nat-death aws_nat_gateway.n["a.b"]"#,
+            r#"single-nat-death aws_nat_gateway.n["a_b"]"#,
+            "az-outage us-east-1a",
+        ];
+        let stems = scenario_stems(&names);
+        let unique: std::collections::HashSet<&String> = stems.iter().collect();
+        assert_eq!(unique.len(), names.len(), "{stems:?}");
+        assert_eq!(
+            stems[4], "az-outage-us-east-1a",
+            "a unique name keeps its plain stem"
+        );
+        assert!(stems[0].starts_with("single-nat-death-aws-nat-gateway-a-b-"));
+        // Deterministic, and independent of order.
+        let mut rev = names;
+        rev.reverse();
+        let mut again = scenario_stems(&rev);
+        again.reverse();
+        assert_eq!(again, stems);
+    }
 
     #[test]
     fn the_fix_request_carries_only_the_failed_resources_scrubbed() {
