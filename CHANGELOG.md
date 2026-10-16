@@ -51,6 +51,9 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **web/ dev dependencies upgraded** to clear `npm audit` (14 findings, 2 critical, 7 high, all
+  dev-only, via vite 5 / vitest 2): vite 8.3, vitest 5.0, @vitejs/plugin-react 6.1, jsdom 29.
+  `npm audit` reports 0. CI's web job runs Node 22 (vitest 5 requires ^22.12).
 - The default model is `claude-opus-5-5` (was `claude-opus-5`).
 
 - **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
