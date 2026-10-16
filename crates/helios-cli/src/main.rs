@@ -34,13 +34,19 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Re-run simulation with a proposed fix applied and confirm it resolves failures.
+    /// Re-run simulation with a proposed fix applied: the fix's own scenario, every other
+    /// `--scenario` given, and every zone, region and NAT outage of the graph. Exits 0 only when
+    /// the fix's scenario is clean and NO scenario fails anywhere it did not before.
     Verify {
         input: PathBuf,
-        #[arg(long)]
-        scenario: PathBuf,
+        /// Scenario YAML; repeatable. One must be the scenario the fix names (`scenario_name`).
+        #[arg(long, required = true)]
+        scenario: Vec<PathBuf>,
         #[arg(long)]
         fix: PathBuf,
+        /// Emit the per-scenario report as JSON on stdout instead of plain text.
+        #[arg(long)]
+        json: bool,
     },
     /// Emit a combined `{graph, chain}` JSON document for the web viewer / GitHub Action.
     Inspect {
@@ -85,7 +91,8 @@ fn main() -> Result<()> {
             input,
             scenario,
             fix,
-        } => cmd_verify(&input, &scenario, &fix),
+            json,
+        } => cmd_verify(&input, &scenario, &fix, json),
         Command::Inspect { input, scenario } => cmd_inspect(&input, &scenario),
         Command::Explain => cmd_explain(),
         Command::ProposeFix { input, scenario } => cmd_propose_fix(&input, &scenario),
@@ -122,46 +129,108 @@ fn cmd_simulate(input: &std::path::Path, scenario: &std::path::Path, json: bool)
 
 fn cmd_verify(
     input: &std::path::Path,
-    scenario: &std::path::Path,
+    scenarios: &[PathBuf],
     fix: &std::path::Path,
+    json: bool,
 ) -> Result<()> {
     let graph = helios_graph::load(input)?;
-    let scenario = helios_engine::scenario::load(scenario)
+    let scenarios = scenarios
+        .iter()
+        .map(|p| helios_engine::scenario::load(p))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| anyhow::anyhow!("loading scenario: {e}"))?;
     let fix = helios_engine::fix::load(fix).map_err(|e| anyhow::anyhow!("loading fix: {e}"))?;
-    let report = helios_engine::verify(&graph, &scenario, &fix).map_err(|e| {
+    let report = helios_engine::verify(&graph, &scenarios, &fix).map_err(|e| {
         if let helios_engine::VerifyError::Simulate(inner) = &e {
             exit_if_inconclusive(inner);
         }
         anyhow::anyhow!("verify: {e}")
     })?;
+    let verdict = report.verdict();
 
-    println!("Scenario: {}", report.pre_fix.scenario);
-    println!("Pre-fix failures:  {}", report.pre_fix.failures.len());
-    println!("Post-fix failures: {}", report.post_fix.failures.len());
+    if json {
+        let doc = serde_json::json!({
+            "fix_scenario": fix.scenario_name,
+            "verdict": verdict,
+            "scenarios": report.scenarios,
+        });
+        serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
+        println!();
+    } else {
+        print!("{}", render_verify(&report));
+    }
+    match verdict {
+        helios_engine::Verdict::Resolved => Ok(()),
+        helios_engine::Verdict::Inconclusive => std::process::exit(EXIT_INCONCLUSIVE),
+        _ => std::process::exit(1),
+    }
+}
 
-    if !report.resolved.is_empty() {
-        println!("\nResolved ({}):", report.resolved.len());
-        for r in &report.resolved {
-            println!("  [OK] {r}");
+fn render_verify(report: &helios_engine::VerifyReport) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Fix for: {} (checked against {} scenarios)",
+        report.target().scenario,
+        report.scenarios.len()
+    );
+    let count = |c: &Option<helios_engine::FailureChain>| {
+        c.as_ref()
+            .map_or("inconclusive".to_string(), |c| c.failures.len().to_string())
+    };
+    for s in &report.scenarios {
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Scenario: {}{}",
+            s.scenario,
+            if s.target {
+                " [the fix's scenario]"
+            } else {
+                ""
+            }
+        );
+        let _ = writeln!(out, "Pre-fix failures:  {}", count(&s.pre_fix));
+        let _ = writeln!(out, "Post-fix failures: {}", count(&s.post_fix));
+        if let Some(why) = &s.inconclusive {
+            let _ = writeln!(out, "  INCONCLUSIVE (not a pass): {why}");
+        }
+        for (title, tag, ids) in [
+            ("Resolved", "[OK]", &s.resolved),
+            ("New failures introduced", "[NEW]", &s.new_failures),
+            ("Still failing", "[--]", &s.remaining),
+        ] {
+            if !ids.is_empty() {
+                let _ = writeln!(out, "  {title} ({}):", ids.len());
+                for id in ids {
+                    let _ = writeln!(out, "    {tag} {id}");
+                }
+            }
         }
     }
-    if !report.new_failures.is_empty() {
-        println!("\nNew failures introduced ({}):", report.new_failures.len());
-        for n in &report.new_failures {
-            println!("  [NEW] {n}");
+    let worse: Vec<&str> = report
+        .scenarios
+        .iter()
+        .filter(|s| !s.new_failures.is_empty())
+        .map(|s| s.scenario.as_str())
+        .collect();
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "Verdict: {}",
+        match report.verdict() {
+            helios_engine::Verdict::NewFailures =>
+                format!("NEW FAILURES INTRODUCED in {}", worse.join(", ")),
+            helios_engine::Verdict::StillFailing =>
+                "STILL FAILING: the fix's scenario has failures left".to_string(),
+            helios_engine::Verdict::Inconclusive =>
+                "INCONCLUSIVE: a scenario could not be evaluated (not a pass)".to_string(),
+            helios_engine::Verdict::Resolved =>
+                "RESOLVED: the fix's scenario is clean and nothing else got worse".to_string(),
         }
-    }
-    if !report.remaining.is_empty() {
-        println!("\nStill failing ({}):", report.remaining.len());
-        for r in &report.remaining {
-            println!("  [--] {r}");
-        }
-    }
-    if !report.is_safe() {
-        std::process::exit(1);
-    }
-    Ok(())
+    );
+    out
 }
 
 fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()> {

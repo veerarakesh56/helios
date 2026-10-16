@@ -16,4 +16,4 @@ pub use inspect::{
 pub use report::{FailedResource, FailureChain};
 pub use scenario::{Scenario, ScenarioError, ScenarioKind};
 pub use simulate::{simulate, SimulateError};
-pub use verify::{verify, VerifyError, VerifyReport};
+pub use verify::{standard_scenarios, verify, ScenarioDiff, Verdict, VerifyError, VerifyReport};

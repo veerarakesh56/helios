@@ -92,7 +92,7 @@ helios plan     <tf-json-dir>                             # source (state|plan),
 helios simulate <tf-json> --scenario <yaml> [--json]      # run the engine, print the failure chain
 helios explain  < chain.json                              # Claude narrates it, via the Python shell
 helios propose-fix <tf-json> --scenario <yaml>            # simulate, then Claude proposes a FixProposal
-helios verify   <tf-json> --scenario <yaml> --fix <json>  # re-simulate with the fix, diff the result
+helios verify   <tf-json> --scenario <yaml> --fix <json>  # re-simulate EVERY scenario with the fix, diff each
 helios inspect  <tf-json> --scenario <yaml>               # {scenario, graph, chain} for viewer/Action
 ```
 
@@ -124,11 +124,18 @@ Adding a scenario kind or an AWS resource type is the easiest first contribution
 `FixProposal` (`{scenario_name, explanation, edits[]}`) from Claude using `output_config.format` and
 a two-breakpoint prompt cache — so the *shape* of a fix is enforced by the type, not by the prompt.
 
-`helios verify` then applies those edits to a clone of the graph and re-runs the solver. It prints
-`Pre-fix failures` / `Post-fix failures` and the three sections that matter — `Resolved`,
-`Still failing`, `New failures introduced` — exiting non-zero if anything still fails.
+`helios verify` then applies those edits to a clone of the graph and re-runs the solver — not only
+for the fix's own scenario but for every `--scenario` given (repeatable) and every zone, region and
+NAT-gateway outage of the graph. Per scenario it prints `Pre-fix failures` / `Post-fix failures` and
+the three sections that matter — `Resolved`, `Still failing`, `New failures introduced` — then a
+verdict. It exits 1 if the fix's scenario still fails or **any** scenario fails somewhere it did not
+before, 3 if a scenario cannot be evaluated, and rejects a fix whose `scenario_name` is not one of
+the scenarios given. `--json` emits the same report as a document.
 
-**A fix that introduces a new failure is caught by the engine, not by a reviewer.**
+**A fix that introduces a new failure is caught by the engine, not by a reviewer.** The shipped
+`fixes/az-outage.json` is the example: it moves every us-east-1a resource to us-east-1b, so the
+1a outage comes out clean — and a 1b outage takes 5 resources down instead of 1. `verify` says so
+and exits 1.
 
 ## GitHub Action
 

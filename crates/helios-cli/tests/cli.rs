@@ -279,6 +279,82 @@ fn verify_with_resolving_fix_reports_resolved_section() {
     );
 }
 
+/// The shipped fix moves every us-east-1a resource to us-east-1b: its own scenario comes out clean,
+/// a 1b outage takes 5 resources instead of 1. That is a regression, and verify must exit 1.
+#[test]
+fn verify_fails_a_fix_that_moves_the_damage_to_another_zone() {
+    let root = repo_root();
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_helios"))
+            .current_dir(&root)
+            .args([
+                "verify",
+                "fixtures/three-tier-webapp",
+                "--scenario",
+                "fixtures/scenarios/az-outage.yaml",
+                "--fix",
+                "fixes/az-outage.json",
+            ])
+            .args(extra)
+            .output()
+            .expect("spawn helios verify")
+    };
+    let output = run(&[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("Verdict: NEW FAILURES INTRODUCED in az-outage us-east-1b"),
+        "{stdout}"
+    );
+
+    let output = run(&["--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let doc: Value = serde_json::from_slice(&output.stdout).expect("verify --json is JSON");
+    assert_eq!(doc["verdict"], "new-failures");
+    assert_eq!(doc["fix_scenario"], "lose-us-east-1a");
+    let scenarios = doc["scenarios"].as_array().unwrap();
+    assert_eq!(scenarios[0]["scenario"], "lose-us-east-1a");
+    assert_eq!(scenarios[0]["target"], true);
+    assert_eq!(scenarios[0]["post_fix"]["failures"], serde_json::json!([]));
+    let b = scenarios
+        .iter()
+        .find(|s| s["scenario"] == "az-outage us-east-1b")
+        .expect("1b checked");
+    assert_eq!(b["pre_fix"]["failures"].as_array().unwrap().len(), 1);
+    assert_eq!(b["post_fix"]["failures"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+fn verify_rejects_a_fix_written_for_another_scenario() {
+    let root = repo_root();
+    let tmp = tempfile::tempdir().unwrap();
+    let fix_path = tmp.path().join("fix.json");
+    std::fs::write(
+        &fix_path,
+        r#"{"scenario_name":"something-else","explanation":"x","edits":[{"op":"set_attr","resource_id":"aws_elasticache_cluster.cache","key":"availability_zone","value":"us-east-1b"}]}"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args([
+            "verify",
+            "fixtures/three-tier-webapp",
+            "--scenario",
+            "fixtures/scenarios/az-outage.yaml",
+            "--fix",
+        ])
+        .arg(&fix_path)
+        .output()
+        .expect("spawn helios verify");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("something-else") && stderr.contains("lose-us-east-1a"),
+        "{stderr}"
+    );
+}
+
 #[test]
 fn verify_rejects_fix_naming_unknown_resource() {
     let root = repo_root();
@@ -286,7 +362,7 @@ fn verify_rejects_fix_naming_unknown_resource() {
     let fix_path = tmp.path().join("bad.json");
     std::fs::write(
         &fix_path,
-        r#"{"scenario_name":"x","explanation":"x","edits":[{"op":"set_attr","resource_id":"aws_nope.ghost","key":"foo","value":1}]}"#,
+        r#"{"scenario_name":"lose-us-east-1a","explanation":"x","edits":[{"op":"set_attr","resource_id":"aws_nope.ghost","key":"foo","value":1}]}"#,
     )
     .unwrap();
 
