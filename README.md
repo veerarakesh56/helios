@@ -94,6 +94,7 @@ helios explain  < chain.json                              # Claude narrates it, 
 helios propose-fix <tf-json> --scenario <yaml>            # simulate, then Claude proposes a FixProposal
 helios verify   <tf-json> --scenario <yaml> --fix <json>  # re-simulate EVERY scenario with the fix, diff each
 helios inspect  <tf-json> --scenario <yaml>               # {scenario, graph, chain} for viewer/Action
+helios scenarios <tf-json> --out <dir>                    # write the standard zone/region/NAT scenarios
 ```
 
 Pipe them:
@@ -139,12 +140,17 @@ and exits 1.
 
 ## GitHub Action
 
-[`action/`](./action) is a composite action. It runs every scenario in `fixtures/scenarios/*.yaml`,
+[`action/`](./action) is a composite action. It simulates **your** `terraform show -json` output
+(`terraform-json`, required) under every scenario in `scenarios-glob` — or, when that is empty (the
+default), under the standard set `helios scenarios` derives from the plan: an `az-outage` per zone,
+a `region-outage` per region and a `single-nat-death` per NAT gateway. It builds Helios from the
+action's own source (Z3 sha256-pinned), never from your workspace,
 optionally re-runs `helios verify` when a matching `fixes/<scenario>.json` is committed (shown as
 advisory output: the gate judges the real plan only), uploads each
 `inspect` JSON as a workflow artifact, and posts **one sticky PR comment** summarising the verdict —
-a collapsible `<details>` per scenario. It caches the prebuilt binary on `Cargo.lock` + crate
-sources, so the second run on a PR is fast.
+a collapsible `<details>` per scenario. It caches the prebuilt binary on a hash of its own
+`Cargo.lock` + crate sources, so the second run on a PR is fast. The runner needs Rust (`cargo`),
+`python3` and `jq`, as GitHub's `ubuntu-latest` has.
 
 ```yaml
 on: pull_request
@@ -156,10 +162,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: veerarakesh56/helios/action@v0.2.0
+      # ... terraform init && terraform plan -out=tfplan && terraform show -json tfplan > plan.json
+      - uses: veerarakesh56/helios/action@<commit-sha>   # pin a full commit SHA
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          fail-on: failures   # optional; default `never` only reports
+          terraform-json: plan.json   # required: your plan, relative to the repository root
+          fail-on: failures           # optional; default `never` only reports
 ```
 
 ## Web viewer

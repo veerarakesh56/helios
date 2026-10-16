@@ -324,6 +324,40 @@ fn verify_fails_a_fix_that_moves_the_damage_to_another_zone() {
     assert_eq!(b["post_fix"]["failures"].as_array().unwrap().len(), 5);
 }
 
+/// What the Action runs when the caller names no scenarios: one file per zone, region and NAT.
+#[test]
+fn scenarios_writes_the_standard_set_for_the_plan() {
+    let root = repo_root();
+    let tmp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_helios"))
+        .current_dir(&root)
+        .args(["scenarios", "fixtures/wave4-fullstack/plan.json", "--out"])
+        .arg(tmp.path())
+        .output()
+        .expect("spawn helios scenarios");
+    assert!(output.status.success(), "{output:?}");
+    let mut names: Vec<String> = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "az-outage-ap-south-2a.yaml",
+            "az-outage-ap-south-2b.yaml",
+            "region-outage-ap-south-2.yaml",
+            "single-nat-death-aws-nat-gateway-this.yaml"
+        ]
+    );
+    let nat = std::fs::read_to_string(
+        tmp.path()
+            .join("single-nat-death-aws-nat-gateway-this.yaml"),
+    )
+    .unwrap();
+    assert!(nat.contains("type: single-nat-death") && nat.contains("aws_nat_gateway.this"));
+}
+
 #[test]
 fn verify_rejects_a_fix_written_for_another_scenario() {
     let root = repo_root();
