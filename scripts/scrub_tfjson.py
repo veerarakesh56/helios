@@ -29,7 +29,7 @@ Stdlib only.
 from __future__ import annotations
 
 import json
-import os
+import pathlib
 import re
 import sys
 from typing import Any
@@ -222,17 +222,18 @@ def scrub(doc: dict) -> dict:
     return Scrubber().strings(out)
 
 
-def inside_cwd(arg: str) -> str:
-    """The real path of `arg` when it lies inside the working directory; else ValueError.
+def inside_cwd(arg: str) -> pathlib.Path:
+    """The real path of `arg` (symlinks resolved) when it lies inside the working directory; else
+    ValueError.
 
     The input path may come from an agent's command line: without this, `../../` or an absolute
     path would read (and print, scrubbed or not) any JSON file the user can read."""
-    base = os.path.realpath(os.getcwd())
-    path = os.path.realpath(arg)
-    if os.path.commonpath([base, path]) != base:
+    base = pathlib.Path.cwd().resolve()
+    real = pathlib.Path(arg).resolve()
+    if not real.is_relative_to(base):
         raise ValueError(f"{arg} is outside the working directory {base}; run from its folder, "
                          "or pipe it in with `-`")
-    return path
+    return real
 
 
 def main() -> int:
@@ -243,11 +244,11 @@ def main() -> int:
         doc = json.load(sys.stdin)
     else:
         try:
-            path = inside_cwd(sys.argv[1])
+            real = inside_cwd(sys.argv[1])
         except ValueError as e:
             print(f"scrub_tfjson: {e}", file=sys.stderr)
             return 2
-        with open(path, encoding="utf-8") as f:
+        with real.open(encoding="utf-8") as f:
             doc = json.load(f)
     sys.stdout.reconfigure(encoding="utf-8")
     json.dump(scrub(doc), sys.stdout, indent=2, ensure_ascii=False)
