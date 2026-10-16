@@ -15,6 +15,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   under a 1b outage it takes 5 resources down instead of 1, and verify now says so. A fix whose
   `scenario_name` is not one of the scenarios given is rejected. `verify --json` emits the
   per-scenario report; `VerifyReport` is now `{ scenarios: [ScenarioDiff] }` with `verdict()`.
+- **The Action's gate judges the real plan only.** A committed `fixes/<stem>.json` used to pass its
+  scenario whenever `helios verify` exited 0 -- but a fix edits Helios's in-memory graph, not the
+  Terraform, so a PR passed with its Terraform unchanged. A scenario now fails the gate when the
+  plan's chain has failures (or it is inconclusive), fix or no fix; the verify report is shown in
+  the comment as advisory output.
 
 ## [0.2.0] - 2026-09-26
 

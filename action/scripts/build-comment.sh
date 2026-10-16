@@ -48,7 +48,7 @@ for inspect_json in "$ARTIFACT_DIR"/*.json; do
     verify_txt="$ARTIFACT_DIR/$stem.verify.txt"
     if [[ -f "$verify_txt" ]]; then
       echo
-      echo "**With fix applied (\`fixes/$stem.json\`):**"
+      echo "**Advisory — proposed fix \`fixes/$stem.json\` re-simulated in memory.** It does not change your Terraform and never passes this scenario: make the change in the Terraform and the next run judges the real plan."
       echo
       echo '```'
       cat "$verify_txt"

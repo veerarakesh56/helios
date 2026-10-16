@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Loop over every scenario YAML matching $SCENARIOS_GLOB. For each:
 #   - run `helios inspect` and dump JSON to $ARTIFACT_DIR/<stem>.json
-#   - if $FIXES_DIR/<stem>.json exists, run `helios verify` and capture
-#     a per-scenario summary line into $ARTIFACT_DIR/<stem>.verify.txt
+#   - if $FIXES_DIR/<stem>.json exists, run `helios verify` (against every
+#     scenario in the glob) and capture its report into
+#     $ARTIFACT_DIR/<stem>.verify.txt -- ADVISORY output only
 #
-# A scenario FAILS when its chain has failures and no fix is committed, when
-# `helios verify` exits non-zero, or when it is INCONCLUSIVE (helios exits 3: it
-# cannot be evaluated, e.g. an iam-revocation on a plan whose roles are unknown;
-# the message goes to $ARTIFACT_DIR/<stem>.inconclusive.txt, never read as a pass). Failed stems are written one per line to
-# $GATE_FILE (empty file = all passed); the action's last step gates on it.
+# The gate judges the REAL plan only. A scenario FAILS when its chain has
+# failures, or when it is INCONCLUSIVE (helios exits 3: it cannot be evaluated,
+# e.g. an iam-revocation on a plan whose roles are unknown; the message goes to
+# $ARTIFACT_DIR/<stem>.inconclusive.txt, never read as a pass). A fix file never
+# passes a scenario: `verify` edits Helios's in-memory graph, not the Terraform,
+# so a PR whose Terraform is unchanged would pass. Failed stems are written one
+# per line to $GATE_FILE (empty file = all passed); the action's last step gates on it.
 #
 # Inputs (env): HELIOS_BIN, SCENARIOS_GLOB, FIXES_DIR, TERRAFORM_JSON, ARTIFACT_DIR, GATE_FILE
 # Output (GHA step): artifact-dir = $ARTIFACT_DIR
@@ -60,19 +63,22 @@ for scenario in "${matches[@]}"; do
   # A standalone assignment, so `set -e` aborts if jq is missing rather than the gate silently passing.
   failure_count=$(jq '.chain.failures | length' "$inspect_out")
 
+  if [[ $failure_count -gt 0 ]]; then
+    echo "$stem" >> "$GATE_FILE"
+  fi
+
   fix_path="$FIXES_DIR/$stem.json"
   if [[ -f "$fix_path" ]]; then
     verify_out="$ARTIFACT_DIR/$stem.verify.txt"
-    # `verify` exits non-zero if any failures remain — capture but don't abort.
+    # Advisory: what the fix WOULD do if made in the Terraform. Its exit code never touches the gate.
+    scenario_args=()
+    for s in "${matches[@]}"; do scenario_args+=(--scenario "$s"); done
     set +e
-    "$HELIOS_BIN" verify "$TERRAFORM_JSON" --scenario "$scenario" --fix "$fix_path" \
+    "$HELIOS_BIN" verify "$TERRAFORM_JSON" "${scenario_args[@]}" --fix "$fix_path" \
       > "$verify_out" 2>&1
     rc=$?
     set -e
-    echo "wrote $verify_out (verify rc=$rc)"
-    if [[ $rc -ne 0 ]]; then echo "$stem" >> "$GATE_FILE"; fi
-  elif [[ $failure_count -gt 0 ]]; then
-    echo "$stem" >> "$GATE_FILE"
+    echo "wrote $verify_out (advisory verify rc=$rc; the gate judges the plan only)"
   fi
 
   echo "::endgroup::"

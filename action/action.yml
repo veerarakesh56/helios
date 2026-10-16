@@ -1,8 +1,9 @@
 name: Helios PR analysis
 description: >
-  Run helios simulate (and verify, if a matching fix is committed) over every
-  scenario in fixtures/scenarios/, upload the resulting `inspect` JSON
-  artifacts, and post a single sticky PR comment summarising results.
+  Run helios over every scenario against your Terraform plan (and, as
+  advisory output only, verify a matching fix file if one is committed),
+  upload the resulting `inspect` JSON artifacts, and post a single sticky PR
+  comment summarising results.
 author: veerarakesh56
 
 branding:
@@ -16,8 +17,10 @@ inputs:
     default: fixtures/scenarios/*.yaml
   fixes-dir:
     description: >
-      Directory holding `<scenario-stem>.json` FixProposal files. If present
-      and a matching file exists, helios verify runs after inspect.
+      Directory holding `<scenario-stem>.json` FixProposal files. If a
+      matching file exists, helios verify runs after inspect and its report is
+      shown as ADVISORY output: a fix file never passes a scenario (it edits
+      Helios's in-memory graph, not your Terraform).
     required: false
     default: fixes
   terraform-json:
@@ -38,9 +41,9 @@ inputs:
   fail-on:
     description: >
       `never` (default) only reports. `failures` fails the step, after the
-      comment and artifacts are posted, when any scenario failed: its chain has
-      failures and no fix is committed, `helios verify` exits non-zero, or it is
-      inconclusive (helios exits 3: it cannot be evaluated, never a pass).
+      comment and artifacts are posted, when any scenario failed on the real
+      plan: its chain has failures, or it is inconclusive (helios exits 3: it
+      cannot be evaluated, never a pass). Fix files do not affect the gate.
     required: false
     default: never
 
