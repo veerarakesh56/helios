@@ -135,7 +135,11 @@ as `Z3_LIBRARY_PATH_OVERRIDE`. Static on Linux/macOS; `libz3.dll` on Windows.
 
 ### `helios-cli`
 
-Six subcommands:
+Seven subcommands:
+
+- `helios scenarios <tf-json> --out <dir>` -- write the standard scenarios
+  (`standard_scenarios`: an az-outage per zone, a region-outage per region,
+  a single-nat-death per NAT gateway) as YAML, one file each.
 
 - `helios plan <tf-json-dir>` -- print the source (`state` or `plan`) and
   resource and edge counts.
@@ -193,22 +197,27 @@ implemented.
 
 ## The GitHub Action (`action/`)
 
-Composite action. Inputs: `scenarios-glob`, `fixes-dir`, `terraform-json`,
-`github-token`, `artifact-name`. Steps:
+Composite action. Inputs: `terraform-json` (required), `scenarios-glob`,
+`fixes-dir`, `github-token`, `artifact-name`, `fail-on`. Steps:
 
-1. `actions/cache@v4` keyed on `Cargo.lock` + crate sources.
-2. Cache miss -> `cargo build --release --bin helios` -> copy to
-   `${{ github.action_path }}/bin/helios`.
-3. `action/scripts/run-scenarios.sh` -- loops the glob, writes
+1. Hash the action's own `Cargo.lock` + crate sources (in
+   `${{ github.action_path }}/..`; `hashFiles()` reads only the caller's
+   workspace) and `actions/cache@v4` the binary on it.
+2. Cache miss -> in `${{ github.action_path }}/..`: `scripts/fetch_z3.py`,
+   `cargo build --release --locked --bin helios` -> copy to
+   `${{ github.action_path }}/bin/helios`. Never in the caller's workspace.
+3. `terraform-json` is required. With no `scenarios-glob`, `helios
+   scenarios` writes the plan's standard set (zone / region / NAT outages).
+4. `action/scripts/run-scenarios.sh` -- loops the glob, writes
    `<stem>.json` per scenario plus `<stem>.verify.txt` if
    `fixes/<stem>.json` exists. The gate (`fail-on: failures`) judges the
    real plan's chain only; the verify report is advisory and never passes a
    scenario, since a fix file edits the in-memory graph, not the Terraform.
-4. `action/scripts/build-comment.sh` -- jq-aggregates the per-scenario
+5. `action/scripts/build-comment.sh` -- jq-aggregates the per-scenario
    summaries into one `<details>`-collapsible markdown body marked with
    `<!-- helios-action -->`.
-5. `actions/upload-artifact@v4` uploads the per-scenario JSON dir.
-6. `action/scripts/post-sticky.sh` -- `gh api --paginate` lists comments,
+6. `actions/upload-artifact@v4` uploads the per-scenario JSON dir.
+7. `action/scripts/post-sticky.sh` -- `gh api --paginate` lists comments,
    matches the marker, PATCHes if found else POSTs. Idempotent.
 
 The marker is the literal `<!-- helios-action -->` on the first line. One

@@ -54,6 +54,13 @@ enum Command {
         #[arg(long)]
         scenario: PathBuf,
     },
+    /// Write the standard scenarios for a graph (an az-outage per zone, a region-outage per
+    /// region, a single-nat-death per NAT gateway) as YAML files into `--out`; prints each path.
+    Scenarios {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Narrate a FailureChain (read as JSON on stdin) via the helios-ai Python shell.
     Explain,
     /// Simulate, then ask helios-ai for a FixProposal (JSON on stdout, ready for `verify --fix`).
@@ -94,6 +101,7 @@ fn main() -> Result<()> {
             json,
         } => cmd_verify(&input, &scenario, &fix, json),
         Command::Inspect { input, scenario } => cmd_inspect(&input, &scenario),
+        Command::Scenarios { input, out } => cmd_scenarios(&input, &out),
         Command::Explain => cmd_explain(),
         Command::ProposeFix { input, scenario } => cmd_propose_fix(&input, &scenario),
     }
@@ -241,6 +249,29 @@ fn cmd_inspect(input: &std::path::Path, scenario: &std::path::Path) -> Result<()
     let doc = helios_engine::build_inspect(&graph, chain);
     serde_json::to_writer_pretty(std::io::stdout().lock(), &doc)?;
     println!();
+    Ok(())
+}
+
+fn cmd_scenarios(input: &std::path::Path, out: &std::path::Path) -> Result<()> {
+    let graph = helios_graph::load(input)?;
+    let scenarios = helios_engine::standard_scenarios(&[&graph]);
+    if scenarios.is_empty() {
+        anyhow::bail!(
+            "nothing in {} declares a zone, region or NAT gateway",
+            input.display()
+        );
+    }
+    std::fs::create_dir_all(out)?;
+    for s in scenarios {
+        let stem: String = s
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let path = out.join(format!("{stem}.yaml"));
+        std::fs::write(&path, serde_yaml_ng::to_string(&s)?)?;
+        println!("{}", path.display());
+    }
     Ok(())
 }
 

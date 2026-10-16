@@ -21,6 +21,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plan's chain has failures (or it is inconclusive), fix or no fix; the verify report is shown in
   the comment as advisory output.
 
+- **The Action works from another repository.** It ran `cargo build`, `cp target/release/helios`
+  and `hashFiles('Cargo.lock', 'crates/**')` in the CALLER's workspace and defaulted to Helios's own
+  `fixtures/`, so `uses: veerarakesh56/helios/action@...` failed anywhere else. It now builds from
+  `${{ github.action_path }}/..` with a cache key hashed from the files there, `terraform-json` is
+  required, and an empty `scenarios-glob` (the new default) runs the plan's standard scenarios,
+  written by the new `helios scenarios <tf-json> --out <dir>`. A CI job (`action-consumer`) runs the
+  action from a separate directory with only `terraform-json` set.
+
 ### Security
 
 - **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
