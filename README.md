@@ -161,7 +161,7 @@ jobs:
   helios:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # ... terraform init && terraform plan -out=tfplan && terraform show -json tfplan > plan.json
       - uses: veerarakesh56/helios/action@<commit-sha>   # pin a full commit SHA
         with:
