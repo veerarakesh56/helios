@@ -90,6 +90,10 @@ pub enum VerifyError {
          scenario the fix was proposed for"
     )]
     ScenarioMismatch { fix: String, given: Vec<String> },
+    /// Two supplied scenarios with one name: which one the fix is for cannot be told, and the
+    /// report would show two scenarios under one label.
+    #[error("two scenarios given are both named {0:?} -- scenario names must be unique")]
+    DuplicateScenario(String),
 }
 
 /// The scenarios every fix is checked against, from what the graphs (before and after the fix)
@@ -160,6 +164,10 @@ pub fn verify(
     scenarios: &[Scenario],
     fix: &FixProposal,
 ) -> Result<VerifyReport, VerifyError> {
+    let mut names = BTreeSet::new();
+    if let Some(dup) = scenarios.iter().find(|s| !names.insert(s.name.as_str())) {
+        return Err(VerifyError::DuplicateScenario(dup.name.clone()));
+    }
     let Some(target) = scenarios.iter().find(|s| s.name == fix.scenario_name) else {
         return Err(VerifyError::ScenarioMismatch {
             fix: fix.scenario_name.clone(),
@@ -317,6 +325,26 @@ mod tests {
                 assert_eq!(given, vec!["lose-us-east-1a"]);
             }
             other => panic!("expected ScenarioMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_scenarios_with_one_name_are_rejected() {
+        let graph = from_json(FIXTURE).unwrap();
+        let other_kind = Scenario {
+            name: "lose-us-east-1a".into(),
+            kind: ScenarioKind::RegionOutage {
+                region: "us-east-1".into(),
+            },
+        };
+        let fix = FixProposal {
+            scenario_name: "lose-us-east-1a".into(),
+            explanation: "x".into(),
+            edits: vec![set_az("aws_elasticache_cluster.cache", "us-east-1b")],
+        };
+        match verify(&graph, &[az_1a_scenario(), other_kind], &fix) {
+            Err(VerifyError::DuplicateScenario(name)) => assert_eq!(name, "lose-us-east-1a"),
+            other => panic!("expected DuplicateScenario, got {other:?}"),
         }
     }
 
