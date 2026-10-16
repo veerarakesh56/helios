@@ -5,7 +5,12 @@
 # It runs mocked (HELIOS_AI_MOCK=1, no network) by default; `make demo HELIOS_AI_MOCK=0` with
 # ANTHROPIC_API_KEY set narrates with the real model.
 
-.PHONY: demo test fmt check doc python-check web-check
+.PHONY: z3 demo test fmt check doc python-check web-check
+
+# The pinned, sha256-checked Z3 that z3-sys links (see scripts/fetch_z3.py).
+PYTHON ?= python3
+z3:
+	$(PYTHON) scripts/fetch_z3.py
 
 # Detect Python venv interpreter path per platform. Absolute, because recipes `cd helios-ai` first;
 # quoted at every use, because the checkout path may contain spaces.
@@ -19,7 +24,7 @@ export HELIOS_AI_PYTHON
 
 demo: export HELIOS_AI_MOCK ?= 1
 
-demo:
+demo: z3
 	cargo build --bin helios
 	cargo run -q -p helios-cli -- simulate fixtures/three-tier-webapp \
 		--scenario fixtures/scenarios/az-outage.yaml --json \
@@ -29,7 +34,7 @@ demo:
 		--scenario fixtures/scenarios/az-outage.yaml \
 		--fix fixes/az-outage.json
 
-test:
+test: z3
 	cargo test --workspace
 	cd helios-ai && "$(HELIOS_AI_PYTHON)" -m pytest
 	cd web && npm test
@@ -38,7 +43,7 @@ fmt:
 	cargo fmt --all
 	cd helios-ai && "$(HELIOS_AI_PYTHON)" -m ruff format .
 
-check:
+check: z3
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test --workspace

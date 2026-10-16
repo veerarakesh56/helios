@@ -21,6 +21,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plan's chain has failures (or it is inconclusive), fix or no fix; the verify report is shown in
   the comment as advisory output.
 
+### Security
+
+- **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
+  build time with no hash check (still true of z3-sys 0.13.1, checked 2026-10-16). Helios drops the
+  feature: `scripts/fetch_z3.py` downloads the official Z3 4.16.0 release zip, refuses it unless its
+  sha256 is the pinned one (from the release's published digests, read 2026-10-16), and unpacks the
+  link library into `target/z3/bin`, which `.cargo/config.toml` hands to z3-sys as
+  `Z3_LIBRARY_PATH_OVERRIDE`. CI, the Action and the Makefile run it. The build no longer pulls
+  `reqwest`/`zip` and their tree. The CI comment saying z3-sys used `GITHUB_TOKEN` was wrong (it
+  reads `READ_ONLY_GITHUB_TOKEN`); the variable is gone.
+
 ## [0.2.0] - 2026-09-26
 
 ### Added
