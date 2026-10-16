@@ -12,7 +12,7 @@
 **Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
 *or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
 and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
-**216 tests (161 Rust, 55 Python), plus 7 for the viewer and 9 for the publish guards.**
+**224 tests (168 Rust, 56 Python), plus 7 for the viewer and 20 for the repository scripts.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
 > artifacts are posted, it fails the job when any scenario has failures **on the real plan**, or is
@@ -105,7 +105,7 @@ helios simulate ./infra --scenario scenarios/az-outage.yaml --json | helios expl
 
 ## Scenarios
 
-Five kinds ship in `fixtures/scenarios/`, each a small YAML document (schema in
+Six kinds, one example each in `fixtures/scenarios/`, each a small YAML document (schema in
 [`docs/scenarios.md`](docs/scenarios.md)):
 
 | Scenario | Asks |
@@ -115,6 +115,7 @@ Five kinds ship in `fixtures/scenarios/`, each a small YAML document (schema in
 | `iam-revocation` | a role or policy is pulled |
 | `single-nat-death` | the one NAT gateway everything egresses through dies |
 | `slow-rds-failover` | the database fails over, but not quickly |
+| `resource-loss` | any one resource (a cache, a queue, a node group) is lost |
 
 Adding a scenario kind or an AWS resource type is the easiest first contribution — see
 [`CONTRIBUTING.md`](./CONTRIBUTING.md).
@@ -193,14 +194,17 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**200 tests (plus 7 for the web viewer and 7 for the publish guards in `scripts/`):**
+**224 tests (plus 7 for the web viewer and 20 for the scripts in `scripts/`):**
 
 | | |
 |---|---|
-| Rust | **148** across the graph and plan reader, engine, SMT encoding, verify loop and CLI — including exact failure sets for a synthetic Wave 4 stack, NAT egress, and every "not a pass" case |
-| Python | **52** in `helios-ai/`, including syrupy snapshots of the model output |
+| Rust | **168** across the graph and plan reader, engine, SMT encoding, verify loop and CLI — including exact failure sets for a synthetic Wave 4 stack, NAT egress, and every "not a pass" case |
+| Python | **56** in `helios-ai/`, including syrupy snapshots of the model output |
 
-CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite on every push.
+The `scripts/` tests are the publish guards, the Action's gate and comment escaping, the Z3 hash
+pin and the action SHA pins; `scripts/test_readme_counts.py` derives every count above from the tree
+and fails when this section drifts. CI runs `cargo test`, `cargo clippy`, `cargo fmt --check`, the
+Python suite, the `scripts/` tests and the viewer's on every push.
 
 ## Limits, stated plainly
 

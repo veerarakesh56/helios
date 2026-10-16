@@ -27,7 +27,7 @@ jobs:
       - name: No secrets, state or plan files in the tree
         run: python3 scripts/check_publishable.py
 
-      - name: Publish-guard tests (check_publishable, scrub_tfjson)
+      - name: scripts/ tests (publish guards, Action gate + comment, Z3 and action pins, README counts)
         run: python3 -m unittest discover -s scripts -v
 
       - name: Install stable Rust
