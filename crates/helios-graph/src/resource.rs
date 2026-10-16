@@ -224,6 +224,15 @@ impl<'a> Entry<'a> {
     }
 }
 
+/// Resources of one type Helios does not model: they are not in the graph, and NOT assumed healthy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Skipped {
+    #[serde(rename = "type")]
+    pub tf_type: String,
+    pub count: usize,
+    pub addresses: Vec<String>,
+}
+
 /// `config` maps a config address (`module.net.aws_subnet.a`, no instance keys) to its block's
 /// expressions; it is empty for a state document. `regions` maps the same keys to the region of
 /// the provider the block uses: a resource with no `region` of its own gets that one (a plan has
@@ -232,13 +241,13 @@ pub(crate) fn build_graph(
     raw_resources: Vec<RawResource>,
     config: &HashMap<String, Value>,
     regions: &HashMap<String, String>,
-) -> Result<DiGraph<Resource, Dependency>, Error> {
+) -> Result<(DiGraph<Resource, Dependency>, Vec<Skipped>), Error> {
     WARNED.with(|w| w.borrow_mut().clear());
     let mut graph = DiGraph::<Resource, Dependency>::new();
     let mut entries: Vec<Entry> = Vec::new();
     let entry = |raw, node| Entry::new(raw, config, node);
     // Unsupported type -> how many resources of it were skipped: ONE summary line, not one each.
-    let mut skipped: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut skipped: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
     let mut data_sources: Vec<&str> = Vec::new();
 
     for raw in &raw_resources {
@@ -252,7 +261,10 @@ pub(crate) fn build_graph(
             if LINK_ONLY.contains(&raw.tf_type.as_str()) {
                 entries.push(entry(raw, None));
             } else {
-                *skipped.entry(raw.tf_type.as_str()).or_default() += 1;
+                skipped
+                    .entry(raw.tf_type.as_str())
+                    .or_default()
+                    .push(raw.address.clone());
             }
             continue;
         };
@@ -285,15 +297,25 @@ pub(crate) fn build_graph(
             data_sources.join(", ")
         );
     }
+    let mut skipped: Vec<Skipped> = skipped
+        .into_iter()
+        .map(|(t, addresses)| Skipped {
+            tf_type: t.to_string(),
+            count: addresses.len(),
+            addresses,
+        })
+        .collect();
+    skipped.sort_by(|a, b| b.count.cmp(&a.count).then(a.tf_type.cmp(&b.tf_type)));
     if !skipped.is_empty() {
-        let mut by_count: Vec<(&str, usize)> = skipped.into_iter().collect();
-        by_count.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-        let total: usize = by_count.iter().map(|(_, n)| n).sum();
-        let list: Vec<String> = by_count.iter().map(|(t, n)| format!("{t} ({n})")).collect();
+        let total: usize = skipped.iter().map(|s| s.count).sum();
+        let list: Vec<String> = skipped
+            .iter()
+            .map(|s| format!("{} ({})", s.tf_type, s.count))
+            .collect();
         tracing::warn!(
             "skipped {total} resources of {} unsupported types (not in the graph, not assumed \
              healthy): {}",
-            by_count.len(),
+            skipped.len(),
             list.join(", ")
         );
     }
@@ -334,7 +356,7 @@ pub(crate) fn build_graph(
         }
     }
     check_acyclic(&mut graph)?;
-    Ok(graph)
+    Ok((graph, skipped))
 }
 
 /// The raw resources that became entries, in entry order.

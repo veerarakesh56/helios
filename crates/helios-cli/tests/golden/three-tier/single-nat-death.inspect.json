@@ -190,5 +190,6 @@
         "reason": "NAT in subnet aws_subnet.public_a is dead — subnet loses egress"
       }
     ]
-  }
+  },
+  "skipped": []
 }

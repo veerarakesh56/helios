@@ -552,7 +552,10 @@ fn unsupported_types_are_summarised_in_one_line() {
         .output()
         .expect("spawn helios plan");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let summaries: Vec<&str> = stderr.lines().filter(|l| l.contains("skipped")).collect();
+    let summaries: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("unsupported types (not in the graph"))
+        .collect();
     assert_eq!(summaries.len(), 1, "{stderr}");
     assert!(
         summaries[0].contains(
@@ -562,6 +565,54 @@ fn unsupported_types_are_summarised_in_one_line() {
         "{stderr}"
     );
     assert!(!stderr.contains("skipping unsupported"), "{stderr}");
+}
+
+/// Unsupported resources are listed in the JSON, counted on stderr whatever the log level, and
+/// `--fail-on-unsupported` turns them into exit 3 with nothing on stdout.
+#[test]
+fn unsupported_resources_are_listed_counted_and_can_be_made_inconclusive() {
+    let root = repo_root();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_helios"))
+            .current_dir(&root)
+            .args(args)
+            .args([
+                "fixtures/wave4-synthetic/terraform-show.json",
+                "--scenario",
+                "fixtures/wave4-fullstack/scenarios/az-2a.yaml",
+                "--log-level",
+                "off",
+            ])
+            .output()
+            .expect("spawn helios")
+    };
+    let want = serde_json::json!([
+        {"type": "aws_internet_gateway", "count": 1, "addresses": ["aws_internet_gateway.this"]},
+        {"type": "aws_sns_topic", "count": 1, "addresses": ["aws_sns_topic.order_events"]}
+    ]);
+    for cmd in [vec!["simulate", "--json"], vec!["inspect"]] {
+        let output = run(&cmd);
+        let doc: Value = serde_json::from_slice(&output.stdout).expect("JSON on stdout");
+        assert_eq!(doc["skipped"], want, "{cmd:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("NOT SIMULATED: 2 resource(s) of 2 unsupported type(s)"),
+            "{cmd:?}: {stderr}"
+        );
+    }
+    assert_eq!(
+        run(&["inspect"]).status.code(),
+        Some(0),
+        "default unchanged"
+    );
+    for cmd in [vec!["simulate", "--json"], vec!["inspect"]] {
+        let mut args = vec!["--fail-on-unsupported"];
+        args.extend(cmd.iter());
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(3), "{cmd:?}");
+        assert!(output.stdout.is_empty(), "{cmd:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("INCONCLUSIVE (not a pass)"));
+    }
 }
 
 #[test]

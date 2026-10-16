@@ -206,7 +206,10 @@ CI runs `cargo test`, `cargo clippy`, `cargo fmt --check` and the Python suite o
 
 - **AWS only**, and only the 18 resource kinds Helios models (plus 9 it reads only to link them). A
   resource Helios does not model is absent from the graph — it is not assumed healthy, it simply is
-  not there. A modelled resource whose ZONE depends on one that is absent (an ECS service in a
+  not there. On a real plan that can be most of it, so every command says how many on stderr
+  (`helios: NOT SIMULATED: N resource(s) ...`), JSON output lists them under `skipped`
+  (`[{type, count, addresses}]`), the Action's comment shows the count, and
+  `--fail-on-unsupported` makes any of them exit **3** (inconclusive). A modelled resource whose ZONE depends on one that is absent (an ECS service in a
   subnet from a data source) cannot be placed: a zone outage in its region is **inconclusive**.
 - **It reads `terraform show -json`, not live AWS.** `crates/helios-aws` is a stub: live-state
   collection for drift detection is designed but **not implemented**, and its SDK dependencies are
