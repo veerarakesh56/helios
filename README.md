@@ -9,7 +9,7 @@
 
 ![demo](docs/demo.gif)
 
-**Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
+**Status:** v0.2.1: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
 *or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
 and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
 **235 tests (170 Rust, 65 Python), plus 7 for the viewer and 24 for the repository scripts.**

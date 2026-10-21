@@ -6,6 +6,37 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-21
+
+### Changed
+
+- SonarCloud's 18 open code smells on main, each fixed: the Action's scripts write `::error::` to
+  stderr (GitHub still turns it into an annotation; checked on a runner) and name their function
+  arguments; `fetch_z3.py` names `libz3.dll` once; the viewer's props are read-only and its shape
+  errors are `TypeError` (still an `Error`, same messages); composite assertions and multi-call
+  `pytest.raises` blocks in `test_claude_cli.py` are split.
+
+- **README counts are derived and held.** The header said 216 tests (161 Rust / 55 Python / 9
+  guards) while the Tests section said 200 (148 / 52 / 7); "Five kinds ship" sat beside 6 scenario
+  kinds, and no `resource-loss` example shipped. Both now state the real counts (224: 168 Rust, 56
+  Python; 7 viewer; 20 scripts), the scenario table lists all six kinds,
+  `fixtures/scenarios/resource-loss.yaml` ships (with three-tier goldens), and
+  `scripts/test_readme_counts.py` fails when a count, the kind count, a kind's table row or its
+  example file drifts.
+- **web/ dev dependencies upgraded** to clear `npm audit` (14 findings, 2 critical, 7 high, all
+  dev-only, via vite 5 / vitest 2): vite 8.3, vitest 5.0, @vitejs/plugin-react 6.1, jsdom 29.
+  `npm audit` reports 0. CI's web job runs Node 22 (vitest 5 requires ^22.12).
+- The default model is `claude-opus-5-5` (was `claude-opus-5`).
+
+- **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
+  build time with no hash check (still true of z3-sys 0.13.1, checked 2026-10-16). Helios drops the
+  feature: `scripts/fetch_z3.py` downloads the official Z3 4.16.0 release zip, refuses it unless its
+  sha256 is the pinned one (from the release's published digests, read 2026-10-16), and unpacks the
+  link library into `target/z3/bin`, which `.cargo/config.toml` hands to z3-sys as
+  `Z3_LIBRARY_PATH_OVERRIDE`. CI, the Action and the Makefile run it. The build no longer pulls
+  `reqwest`/`zip` and their tree. The CI comment saying z3-sys used `GITHUB_TOKEN` was wrong (it
+  reads `READ_ONLY_GITHUB_TOKEN`); the variable is gone.
+
 ### Fixed
 
 - **A fenced model reply no longer takes super-linear time to unwrap.** The `claude_cli` provider
@@ -19,29 +50,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   benchmarking (198.18.0.0/15), reserved (240.0.0.0/4), `0.0.0.0/8` and multicast (224.0.0.0/4)
   addresses are no longer reported, as none can be a public host. `scan()` is split into small functions (same output, pinned by
   a new test).
-
-### Changed
-
-- SonarCloud's 18 open code smells on main, each fixed: the Action's scripts write `::error::` to
-  stderr (GitHub still turns it into an annotation; checked on a runner) and name their function
-  arguments; `fetch_z3.py` names `libz3.dll` once; the viewer's props are read-only and its shape
-  errors are `TypeError` (still an `Error`, same messages); composite assertions and multi-call
-  `pytest.raises` blocks in `test_claude_cli.py` are split.
-
-### Security
-
-- **`scripts/scrub_tfjson.py` reads only inside the working directory.** Its input path can come
-  from an agent's command line; `../` or an absolute path used to read any JSON file the user
-  could. A path that resolves (symlinks included) outside the working directory is refused, exit 2;
-  stdin (`-`) is unchanged.
-- **CI installs nothing that runs setup code.** `uv sync --frozen --no-build --no-install-project`
-  (locked wheels only; helios-ai is put on `PYTHONPATH` rather than built with an unlocked
-  hatchling), ruff and pytest run from the venv instead of `uv run`, `npm ci --ignore-scripts`,
-  and `pull-requests: write` is granted only to the two jobs that run the Action.
-- **`.sonarcloud.properties` excludes `fixtures/`** from SonarQube Cloud analysis: deliberately
-  weak test infrastructure that the simulator and golden tests depend on, not product code.
-
-### Fixed
 
 - **`helios verify` checks every scenario, not only the fix's.** It re-simulates the fix's scenario,
   every other `--scenario` given (now repeatable), and every zone, region and NAT-gateway outage of
@@ -73,6 +81,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **`scripts/scrub_tfjson.py` reads only inside the working directory.** Its input path can come
+  from an agent's command line; `../` or an absolute path used to read any JSON file the user
+  could. A path that resolves (symlinks included) outside the working directory is refused, exit 2;
+  stdin (`-`) is unchanged.
+- **CI installs nothing that runs setup code.** `uv sync --frozen --no-build --no-install-project`
+  (locked wheels only; helios-ai is put on `PYTHONPATH` rather than built with an unlocked
+  hatchling), ruff and pytest run from the venv instead of `uv run`, `npm ci --ignore-scripts`,
+  and `pull-requests: write` is granted only to the two jobs that run the Action.
+- **`.sonarcloud.properties` excludes `fixtures/`** from SonarQube Cloud analysis: deliberately
+  weak test infrastructure that the simulator and golden tests depend on, not product code.
+
 - **The PR comment escapes what the PR controls.** Scenario names, file stems, resource ids, kinds
   and reasons went into the comment's markdown/HTML raw (a `|` broke the table; `<`, backticks or a
   newline could inject markup). They are now HTML-escaped in `<summary>`/`<pre>` and
@@ -83,29 +102,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each is the commit its major tag pointed at, so behaviour is unchanged). `dtolnay/rust-toolchain`
   now names its `toolchain:` explicitly, as a SHA ref requires. `scripts/test_action_pins.py` fails
   on any unpinned `uses:`.
-
-### Changed
-
-- **README counts are derived and held.** The header said 216 tests (161 Rust / 55 Python / 9
-  guards) while the Tests section said 200 (148 / 52 / 7); "Five kinds ship" sat beside 6 scenario
-  kinds, and no `resource-loss` example shipped. Both now state the real counts (224: 168 Rust, 56
-  Python; 7 viewer; 20 scripts), the scenario table lists all six kinds,
-  `fixtures/scenarios/resource-loss.yaml` ships (with three-tier goldens), and
-  `scripts/test_readme_counts.py` fails when a count, the kind count, a kind's table row or its
-  example file drifts.
-- **web/ dev dependencies upgraded** to clear `npm audit` (14 findings, 2 critical, 7 high, all
-  dev-only, via vite 5 / vitest 2): vite 8.3, vitest 5.0, @vitejs/plugin-react 6.1, jsdom 29.
-  `npm audit` reports 0. CI's web job runs Node 22 (vitest 5 requires ^22.12).
-- The default model is `claude-opus-5-5` (was `claude-opus-5`).
-
-- **Z3 is pinned by version and sha256.** z3-sys's `gh-release` feature downloaded the Z3 binary at
-  build time with no hash check (still true of z3-sys 0.13.1, checked 2026-10-16). Helios drops the
-  feature: `scripts/fetch_z3.py` downloads the official Z3 4.16.0 release zip, refuses it unless its
-  sha256 is the pinned one (from the release's published digests, read 2026-10-16), and unpacks the
-  link library into `target/z3/bin`, which `.cargo/config.toml` hands to z3-sys as
-  `Z3_LIBRARY_PATH_OVERRIDE`. CI, the Action and the Makefile run it. The build no longer pulls
-  `reqwest`/`zip` and their tree. The CI comment saying z3-sys used `GITHUB_TOKEN` was wrong (it
-  reads `READ_ONLY_GITHUB_TOKEN`); the variable is gone.
+- **helios-ai dependencies** (locked, from Dependabot #15 and #16): idna 3.13 -> 3.15 (3.14 fixed
+  CVE-2026-45409, a quadratic-time bypass of the CVE-2024-3651 length check) and anyio 4.13.0 ->
+  4.14.2 (new APIs and bug fixes; helios-ai does not call anyio, it comes in through the anthropic
+  SDK and httpx).
 
 ## [0.2.0] - 2026-09-26
 
@@ -560,7 +560,8 @@ viewer.
 
 Internal-only. The public history starts with this release.
 
-[Unreleased]: https://github.com/veerarakesh56/helios/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/veerarakesh56/helios/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/veerarakesh56/helios/releases/tag/v0.2.1
 [0.2.0]: https://github.com/veerarakesh56/helios/releases/tag/v0.2.0
 [0.1.4]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.4
 [0.1.3]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.3
