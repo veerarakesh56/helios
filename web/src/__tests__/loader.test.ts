@@ -17,6 +17,8 @@ describe("parseInspect", () => {
       failures: [],
     });
     expect(() => parseInspect(chain)).toThrow(/graph/);
+    // A wrong shape is a TypeError (still an Error: App.tsx shows its message).
+    expect(() => parseInspect(chain)).toThrow(TypeError);
   });
 
   it("rejects non-JSON input", () => {
@@ -25,6 +27,7 @@ describe("parseInspect", () => {
 
   it("rejects null", () => {
     expect(() => parseInspect("null")).toThrow(/object/);
+    expect(() => parseInspect("null")).toThrow(TypeError);
   });
 
   it("rejects a graph without nodes/edges arrays", () => {
@@ -34,6 +37,7 @@ describe("parseInspect", () => {
       chain: { scenario: "x", failures: [] },
     });
     expect(() => parseInspect(bad)).toThrow(/nodes.*edges/);
+    expect(() => parseInspect(bad)).toThrow(TypeError);
   });
 });
 

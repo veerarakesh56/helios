@@ -56,7 +56,8 @@ PINNED = {
     ),
 }
 # What z3-sys links, per OS. Shared objects are left out on Linux/macOS so the link is static.
-WANTED = {"libz3.a", "libz3.lib", "libz3.dll"}
+DLL = "libz3.dll"  # Windows only: needed at run time, next to the binary
+WANTED = {"libz3.a", "libz3.lib", DLL}
 DEFAULT_DEST = pathlib.Path(__file__).resolve().parent.parent / "target" / "z3"
 
 
@@ -88,12 +89,12 @@ def unpack(data: bytes, dest: pathlib.Path) -> list[str]:
 
 def copy_dll(dest: pathlib.Path) -> None:
     """Windows: put the unpacked libz3.dll next to the debug and release binaries."""
-    dll = dest / "bin" / "libz3.dll"
+    dll = dest / "bin" / DLL
     if not dll.is_file():
         return
     for profile in ("debug", "release"):
         (dest.parent / profile).mkdir(parents=True, exist_ok=True)
-        (dest.parent / profile / "libz3.dll").write_bytes(dll.read_bytes())
+        (dest.parent / profile / DLL).write_bytes(dll.read_bytes())
 
 
 def main(argv: list[str] | None = None) -> int:

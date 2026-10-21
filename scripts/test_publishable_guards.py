@@ -216,6 +216,24 @@ class CheckPublishable(unittest.TestCase):
                      "1.2.3.400", "arn:aws:iam::123456789012:role/x"):
             self.assertEqual(self._scan("a.json", fine), [], fine)
 
+    def test_only_a_globally_routable_ip_is_a_finding(self) -> None:
+        # Special-purpose space (IANA registry, via ipaddress.is_global) is never a public address.
+        for fine in ("100.64.0.1", "198.18.0.1", "240.0.0.1", "0.1.2.3", "255.255.255.255",
+                     "239.255.255.250", "224.0.1.1"):  # multicast: a group, not a host
+            self.assertEqual(self._scan("a.json", fine), [], fine)
+        # Just outside the RFC 1918 / shared / link-local blocks: public, so a finding.
+        for public in ("11.0.0.1", "172.32.0.1", "192.169.0.1", "100.128.0.1", "169.255.0.1"):
+            self.assertTrue(self._scan("a.json", public), public)
+
+    def test_findings_name_the_file_line_and_pattern(self) -> None:
+        text = ("clean line\n"
+                f'"ip": "{PUBLIC_IP}", "arn": "arn:aws:iam::{ACCOUNT}:role/x"\n'
+                '"ip": "10.1.2.3", "hook": "https://hooks.slack.com/services/EXAMPLE"\n')
+        self.assertEqual(self._scan("d/a.json", text), [
+            f"d/a.json:2: a 12-digit AWS account id (account-id: {ACCOUNT[:4]}...{ACCOUNT[-2:]})",
+            f"d/a.json:2: a public IPv4 address (public-ipv4: {PUBLIC_IP[:4]}...{PUBLIC_IP[-2:]})",
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

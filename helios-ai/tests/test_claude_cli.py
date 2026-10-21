@@ -13,6 +13,7 @@ import json
 import pathlib
 import re
 import subprocess
+import time
 
 import pytest
 
@@ -95,7 +96,8 @@ def test_it_runs_outside_the_repository(client, monkeypatch):
     rec = _Recorder()
     _call(client, rec, monkeypatch)
     cwd = pathlib.Path(rec.kwargs["cwd"]).resolve()
-    assert ROOT not in cwd.parents and cwd != ROOT, f"the CLI runs at {cwd}, inside the repo"
+    assert cwd != ROOT, f"the CLI runs at {cwd}, the repo's root"
+    assert ROOT not in cwd.parents, f"the CLI runs at {cwd}, inside the repo"
 
 
 # --------------------------------------------------------------------------- the mechanics
@@ -127,7 +129,8 @@ def test_the_cli_is_spoken_to_in_utf8(client, monkeypatch):
 
 def test_tokens_are_estimated_not_zero(client, monkeypatch):
     reply = _call(client, _Recorder(stdout="x" * 300), monkeypatch)
-    assert reply.usage.input_tokens > 0 and reply.usage.output_tokens > 0
+    assert reply.usage.input_tokens > 0
+    assert reply.usage.output_tokens > 0
 
 
 def test_the_operators_configuration_is_stripped_but_path_kept(client, monkeypatch):
@@ -153,13 +156,15 @@ def test_a_nonzero_exit_reports_stdout_and_stderr(client, monkeypatch):
 
 def test_a_usage_limit_is_labelled(client, monkeypatch):
     real = "You've hit your session limit · resets 7:40pm (Asia/Kolkata)"
+    rec = _Recorder(returncode=1, stdout=real)
     with pytest.raises(RuntimeError, match="usage limit"):
-        _call(client, _Recorder(returncode=1, stdout=real), monkeypatch)
+        _call(client, rec, monkeypatch)
 
 
 def test_an_unrelated_failure_is_not_labelled_a_usage_limit(client, monkeypatch):
+    rec = _Recorder(returncode=1, stderr="Invalid model name")
     with pytest.raises(RuntimeError) as info:
-        _call(client, _Recorder(returncode=1, stderr="Invalid model name"), monkeypatch)
+        _call(client, rec, monkeypatch)
     assert "usage limit" not in str(info.value)
 
 
@@ -246,6 +251,28 @@ def test_propose_fix_fails_closed(client, monkeypatch, stdout):
     monkeypatch.setattr(subprocess, "run", _Recorder(stdout=stdout))
     with pytest.raises(RuntimeError, match="not a valid FixProposal"):
         propose_fix(CHAIN, attrs_snapshot=SNAPSHOT, client=client)
+
+
+@pytest.mark.parametrize(("reply", "body"), [
+    ("```json\n{}\n```", "{}"),
+    ("  \n```\n\n  {\n}  \n ```\t\n", "  {\n}"),  # body starts after the LAST newline
+    ("```py3\nx```", None),      # a tag is letters only
+    ("```json {}```", None),      # no newline after the tag
+    ("```\n```", ""),
+    ("```\na```\n```", "a```"),  # one fence around the whole reply: the LAST backticks close it
+    ("text\n```\n{}\n```", None),
+    ("```\n{}", None),
+])
+def test_unfence_takes_exactly_one_wrapping_fence(reply, body):
+    assert _claude_cli._unfence(reply) == body
+
+
+def test_unfence_is_linear_on_a_long_run_of_whitespace():
+    """The regex it replaced took 0.8s at 400 repeats of "newline, space" and minutes at 5,000."""
+    reply = "```\n" + "\n " * 5_000 + "x"
+    started = time.perf_counter()
+    assert _claude_cli._unfence(reply) is None
+    assert time.perf_counter() - started < 0.5
 
 
 def test_cli_propose_fix_exits_1_with_empty_stdout_on_garbage(monkeypatch, capsys):
