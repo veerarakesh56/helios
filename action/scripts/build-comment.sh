@@ -14,9 +14,9 @@ set -euo pipefail
 # markdown text and table cells -- also one line, and markdown's specials (| ` * _ [ ] ...) escaped.
 JQ_ESC='def html: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
 def md: html | gsub("[\r\n]+"; " ") | gsub("(?<c>[\\\\`*_{}\\[\\]()#+!|~])"; "\\\(.c)");'
-html() { jq -rn --arg s "$1" "$JQ_ESC"' $s | html'; }
+html() { local text="$1"; jq -rn --arg s "$text" "$JQ_ESC"' $s | html'; }
 # A captured text file as a <pre> block: no ``` fence for its content to close.
-pre() { echo "<pre>"; jq -Rr "$JQ_ESC"' html' "$1"; echo "</pre>"; }
+pre() { local file="$1"; echo "<pre>"; jq -Rr "$JQ_ESC"' html' "$file"; echo "</pre>"; }
 
 artifact_url="$SERVER_URL/$REPOSITORY/actions/runs/$RUN_ID#artifacts"
 

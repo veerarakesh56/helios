@@ -17,23 +17,23 @@ export function parseInspect(raw: string): InspectDoc {
   }
 
   if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("Top-level JSON must be an object.");
+    throw new TypeError("Top-level JSON must be an object.");
   }
   const doc = parsed as Record<string, unknown>;
 
   if (typeof doc.scenario !== "string") {
-    throw new Error("Missing string field `scenario` — is this a `helios inspect` output?");
+    throw new TypeError("Missing string field `scenario` — is this a `helios inspect` output?");
   }
   if (typeof doc.graph !== "object" || doc.graph === null) {
-    throw new Error("Missing object field `graph` — drop in `helios inspect` output, not a FailureChain.");
+    throw new TypeError("Missing object field `graph` — drop in `helios inspect` output, not a FailureChain.");
   }
   if (typeof doc.chain !== "object" || doc.chain === null) {
-    throw new Error("Missing object field `chain`.");
+    throw new TypeError("Missing object field `chain`.");
   }
 
   const graph = doc.graph as Record<string, unknown>;
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    throw new Error("`graph` must have array fields `nodes` and `edges`.");
+    throw new TypeError("`graph` must have array fields `nodes` and `edges`.");
   }
 
   return parsed as InspectDoc;

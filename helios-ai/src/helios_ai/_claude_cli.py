@@ -48,7 +48,33 @@ _USAGE_LIMIT = re.compile(
 )
 
 # At most ONE fence wrapping the whole reply. Anything else is left for the validator to reject.
-_FENCE = re.compile(r"\A\s*```[a-zA-Z]*\s*\n(.*?)\n?\s*```\s*\Z", re.DOTALL)
+_TICKS = "```"
+
+
+def _unfence(text: str) -> str | None:
+    """The body of a reply that is exactly one fenced block, else None.
+
+    Accepted: optional whitespace, three backticks, an optional ASCII-letter language tag,
+    whitespace containing at least one newline, the body, optional whitespace, three backticks,
+    optional whitespace. The body starts after the last newline of the whitespace that follows
+    the tag and ends before the whitespace that precedes the closing backticks. (This replaced a
+    backtracking regex - super-linear on a long run of whitespace - with the same results.)
+    """
+    rest = text.lstrip()
+    if not rest.startswith(_TICKS):
+        return None
+    rest = rest[len(_TICKS):]
+    tag = 0
+    while tag < len(rest) and rest[tag].isascii() and rest[tag].isalpha():
+        tag += 1
+    rest = rest[tag:]
+    lead = rest[: len(rest) - len(rest.lstrip())]
+    if "\n" not in lead:
+        return None
+    body = rest[lead.rindex("\n") + 1:].rstrip()
+    if not body.endswith(_TICKS):
+        return None
+    return body[: -len(_TICKS)].rstrip()
 
 
 def _timeout_s() -> float:
@@ -125,9 +151,9 @@ class _Messages:
             raise RuntimeError(f"claude CLI exited {proc.returncode}: {detail or '(no output)'}")
         text = proc.stdout or ""
         if output_config is not None:
-            m = _FENCE.match(text)
-            if m:
-                text = m.group(1)
+            body = _unfence(text)
+            if body is not None:
+                text = body
         return _Message(
             content=[_TextBlock(type="text", text=text)],
             usage=_Usage(input_tokens=_estimate_tokens(system_text + user),

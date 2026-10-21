@@ -28,7 +28,7 @@ matches=( $SCENARIOS_GLOB )
 shopt -u nullglob
 
 if [[ ${#matches[@]} -eq 0 ]]; then
-  echo "::error::no scenarios matched glob '$SCENARIOS_GLOB'"
+  echo "::error::no scenarios matched glob '$SCENARIOS_GLOB'" >&2
   exit 1
 fi
 
@@ -55,7 +55,7 @@ for scenario in "${matches[@]}"; do
   fi
   rm -f "$ARTIFACT_DIR/$stem.stderr.txt"
   if [[ $rc -ne 0 ]]; then
-    echo "::error::helios inspect failed for $stem"
+    echo "::error::helios inspect failed for $stem" >&2
     exit 1
   fi
   echo "wrote $inspect_out ($(wc -c < "$inspect_out") bytes)"
