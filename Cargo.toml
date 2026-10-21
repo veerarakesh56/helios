@@ -14,7 +14,7 @@ edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/<org>/helios"
-authors = ["Veera Rakesh Kethari"]
+authors = ["The Helios Authors"]
 
 [workspace.dependencies]
 # Local crates

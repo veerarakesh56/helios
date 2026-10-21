@@ -1,5 +1,5 @@
 """The repository ships to other organisations, so no tracked file may name a person or a personal account, or point
-at one person's resources: GitHub handles, personal e-mail addresses, or local working-notes paths
+at one person's resources: GitHub handles, a person's name, personal e-mail addresses, or local working-notes paths
 and files. Repository links use `<org>` where the reader fills in their own; a literal one in the tree is a leak.
 
 The forbidden values are assembled from parts, so this file does not itself contain them.
@@ -21,6 +21,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 _HANDLES = ("veera" + "rakesh" + "56",)
 _FORBIDDEN = [
     ("a personal GitHub handle", re.compile("|".join(map(re.escape, _HANDLES)), re.IGNORECASE)),
+    # The copyright notice and the package metadata name "The Helios Authors".
+    ("a person's name", re.compile(r"(?i)\b" + "Veera" + r"\s*" + "Rakesh" + r"\b|\b" + "Keth" + "ari" + r"\b")),
     ("a local working-notes path", re.compile(re.escape("/tmp/" + "claude-"))),
     ("an internal notes file", re.compile(r"\b(?:" + "RULES" + r"|MERGE-" + "QUEUE" + r"|OWNER-[A-Z][A-Z-]*|" + "MEMORY"
                                           + r")\.md\b")),
@@ -55,6 +57,7 @@ class NoPersonalIdentifiers(unittest.TestCase):
     def test_each_kind_of_identifier_is_caught(self):
         planted = [
             (_HANDLES[0].upper() + "/helios", "a personal GitHub handle"),
+            ("by " + "Veera" + " " + "Rakesh", "a person's name"),
             ("see " + "/tmp/" + "claude-0" + "/notes", "a local working-notes path"),
             ("per " + "MERGE-" + "QUEUE" + ".md", "an internal notes file"),
             ("mail " + "someone" + "@" + "gmail" + ".com", "a personal e-mail address"),
