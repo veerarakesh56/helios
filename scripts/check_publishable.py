@@ -61,13 +61,6 @@ FORBIDDEN_NAMES = re.compile(
 # The one deliberate exception: the example file exists to be read.
 ALLOWED_NAMES = re.compile(r"\.tfvars\.example$")
 
-# Addresses that are not a finding: private, loopback, unspecified, link-local, and the three
-# RFC 5737 documentation ranges.
-NON_PUBLIC_V4 = [ipaddress.ip_network(n) for n in (
-    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",  # RFC 1918
-    "127.0.0.0/8", "0.0.0.0/32", "169.254.0.0/16",
-    "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",  # RFC 5737
-)]
 
 PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ("aws-access-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
@@ -109,11 +102,15 @@ PLACEHOLDER = re.compile(
 
 
 def _is_public_ipv4(text: str) -> bool:
+    """Only a globally routable address is a finding. `is_global` reads the IANA special-purpose
+    registry the standard library ships: private (RFC 1918), loopback, unspecified, link-local and
+    the RFC 5737 documentation ranges are not global, nor are shared (100.64.0.0/10), benchmarking
+    (198.18.0.0/15) and reserved (240.0.0.0/4) space - none of which can be a public address."""
     try:
         ip = ipaddress.IPv4Address(text)
     except ValueError:  # an octet > 255: a version string, not an address
         return False
-    return not any(ip in net for net in NON_PUBLIC_V4)
+    return ip.is_global
 
 
 def _git_files() -> list[pathlib.Path]:
@@ -140,39 +137,55 @@ def _is_text(path: pathlib.Path) -> bool:
         return False
 
 
+def _relative(path: pathlib.Path, root: pathlib.Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _is_finding(name: str, value: str) -> bool:
+    if value in ALLOWED or PLACEHOLDER.search(value):
+        return False
+    return name != "public-ipv4" or _is_public_ipv4(value)
+
+
+def _line_findings(rel: str, number: int, line: str) -> list[str]:
+    findings = []
+    for name, pattern, human in PATTERNS:
+        for match in pattern.finditer(line):
+            value = match.group(1) if match.groups() else match.group(0)
+            if _is_finding(name, value):
+                shown = value if len(value) <= 8 else f"{value[:4]}...{value[-2:]}"
+                findings.append(f"{rel}:{number}: {human} ({name}: {shown})")
+    return findings
+
+
+def _file_findings(path: pathlib.Path, rel: str) -> list[str]:
+    if not path.exists() or not _is_text(path):
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    findings = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        findings.extend(_line_findings(rel, number, line))
+    return findings
+
+
 def scan(paths: list[pathlib.Path], *, root: pathlib.Path,
          skipped: list[str] | None = None) -> list[str]:
     findings: list[str] = []
     skipped = [] if skipped is None else skipped
 
     for path in paths:
-        try:
-            rel = path.relative_to(root).as_posix()
-        except ValueError:
-            rel = path.as_posix()
-
+        rel = _relative(path, root)
         # The ORDER matters: a forbidden name is not allowlistable. ALLOWED_PATHS may excuse
         # secret-SHAPED text in a file meant to hold it; never a .tfstate or a tfplan being there.
         if FORBIDDEN_NAMES.search(rel) and not ALLOWED_NAMES.search(rel):
             findings.append(f"{rel}: this file must never be tracked by git")
-            continue
-        if rel in ALLOWED_PATHS:
+        elif rel in ALLOWED_PATHS:
             skipped.append(rel)
-            continue
-        if not path.exists() or not _is_text(path):
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-
-        for number, line in enumerate(text.splitlines(), start=1):
-            for name, pattern, human in PATTERNS:
-                for match in pattern.finditer(line):
-                    value = match.group(1) if match.groups() else match.group(0)
-                    if value in ALLOWED or PLACEHOLDER.search(value):
-                        continue
-                    if name == "public-ipv4" and not _is_public_ipv4(value):
-                        continue
-                    shown = value if len(value) <= 8 else f"{value[:4]}...{value[-2:]}"
-                    findings.append(f"{rel}:{number}: {human} ({name}: {shown})")
+        else:
+            findings.extend(_file_findings(path, rel))
     return findings
 
 

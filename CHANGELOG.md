@@ -6,6 +6,28 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fenced model reply no longer takes super-linear time to unwrap.** The `claude_cli` provider
+  stripped a ```` ``` ```` fence with a backtracking regex: 0.8 s at 400 repeats of "newline,
+  space", minutes at 5,000. `_unfence` does the same in one pass and returns the same result on
+  400,000 generated replies (differential check against the old regex). Tests pin the edge cases
+  and the run time.
+- **`check_publishable.py`: only a globally routable IPv4 is a finding.** The hand-written list of
+  non-public networks is replaced by `ipaddress`'s `is_global` (the IANA special-purpose
+  registry). Every address that was not a finding still is not; shared (100.64.0.0/10),
+  benchmarking (198.18.0.0/15), reserved (240.0.0.0/4) and `0.0.0.0/8` addresses are no longer
+  reported, as none can be public. `scan()` is split into small functions (same output, pinned by
+  a new test).
+
+### Changed
+
+- SonarCloud's 18 open code smells on main, each fixed: the Action's scripts write `::error::` to
+  stderr (GitHub still turns it into an annotation; checked on a runner) and name their function
+  arguments; `fetch_z3.py` names `libz3.dll` once; the viewer's props are read-only and its shape
+  errors are `TypeError` (still an `Error`, same messages); composite assertions and multi-call
+  `pytest.raises` blocks in `test_claude_cli.py` are split.
+
 ### Security
 
 - **`scripts/scrub_tfjson.py` reads only inside the working directory.** Its input path can come

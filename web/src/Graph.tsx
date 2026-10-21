@@ -64,8 +64,8 @@ export const GRAPH_STYLE: cytoscape.StylesheetStyle[] = [
 ];
 
 interface GraphProps {
-  doc: InspectDoc;
-  onSelect: (nodeId: string | null) => void;
+  readonly doc: InspectDoc;
+  readonly onSelect: (nodeId: string | null) => void;
 }
 
 /**

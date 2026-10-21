@@ -12,7 +12,7 @@
 **Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
 *or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
 and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
-**226 tests (170 Rust, 56 Python), plus 7 for the viewer and 22 for the repository scripts.**
+**235 tests (170 Rust, 65 Python), plus 7 for the viewer and 24 for the repository scripts.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
 > artifacts are posted, it fails the job when any scenario has failures **on the real plan**, or is
@@ -194,12 +194,12 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**226 tests (plus 7 for the web viewer and 22 for the scripts in `scripts/`):**
+**235 tests (plus 7 for the web viewer and 24 for the scripts in `scripts/`):**
 
 | | |
 |---|---|
 | Rust | **170** across the graph and plan reader, engine, SMT encoding, verify loop and CLI — including exact failure sets for a synthetic Wave 4 stack, NAT egress, and every "not a pass" case |
-| Python | **56** in `helios-ai/`, including syrupy snapshots of the model output |
+| Python | **65** in `helios-ai/`, including syrupy snapshots of the model output |
 
 The `scripts/` tests are the publish guards, the Action's gate and comment escaping, the Z3 hash
 pin and the action SHA pins; `scripts/test_readme_counts.py` derives every count above from the tree
