@@ -13,7 +13,7 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
-repository = "https://github.com/veerarakesh56/helios"
+repository = "https://github.com/<org>/helios"
 authors = ["Veera Rakesh Kethari"]
 
 [workspace.dependencies]

@@ -152,7 +152,7 @@ def test_a_nonzero_exit_reports_stdout_and_stderr(client, monkeypatch):
 
 
 def test_a_usage_limit_is_labelled(client, monkeypatch):
-    real = "You've hit your session limit · resets 7:40pm (Asia/Kolkata)"
+    real = "You've hit your session limit · resets 7:40pm (Etc/UTC)"
     with pytest.raises(RuntimeError, match="usage limit"):
         _call(client, _Recorder(returncode=1, stdout=real), monkeypatch)
 

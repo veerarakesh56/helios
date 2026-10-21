@@ -36,7 +36,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The Action works from another repository.** It ran `cargo build`, `cp target/release/helios`
   and `hashFiles('Cargo.lock', 'crates/**')` in the CALLER's workspace and defaulted to Helios's own
-  `fixtures/`, so `uses: veerarakesh56/helios/action@...` failed anywhere else. It now builds from
+  `fixtures/`, so `uses: <org>/helios/action@...` failed anywhere else. It now builds from
   `${{ github.action_path }}/..` with a cache key hashed from the files there, `terraform-json` is
   required, and an empty `scenarios-glob` (the new default) runs the plan's standard scenarios,
   written by the new `helios scenarios <tf-json> --out <dir>`. A CI job (`action-consumer`) runs the
@@ -538,10 +538,10 @@ viewer.
 
 Internal-only. The public history starts with this release.
 
-[Unreleased]: https://github.com/veerarakesh56/helios/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/veerarakesh56/helios/releases/tag/v0.2.0
-[0.1.4]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.4
-[0.1.3]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.3
-[0.1.2]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.2
-[0.1.1]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.1
-[0.1.0]: https://github.com/veerarakesh56/helios/releases/tag/v0.1.0
+[Unreleased]: https://github.com/<org>/helios/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/<org>/helios/releases/tag/v0.2.0
+[0.1.4]: https://github.com/<org>/helios/releases/tag/v0.1.4
+[0.1.3]: https://github.com/<org>/helios/releases/tag/v0.1.3
+[0.1.2]: https://github.com/<org>/helios/releases/tag/v0.1.2
+[0.1.1]: https://github.com/<org>/helios/releases/tag/v0.1.1
+[0.1.0]: https://github.com/<org>/helios/releases/tag/v0.1.0

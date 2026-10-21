@@ -1,6 +1,5 @@
 # Helios
 
-[![CI](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml/badge.svg)](https://github.com/veerarakesh56/helios/actions/workflows/ci.yml)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -12,7 +11,7 @@
 **Status:** v0.2.0: 18 AWS resource kinds, 6 failure scenarios, `terraform show -json` of a state
 *or a saved plan*, a GitHub Action that runs every scenario on a pull request and posts the verdict,
 and a web viewer. Validated on a real stack (WARDEN's Wave 4 on AWS, `fixtures/wave4-fullstack/`).
-**226 tests (170 Rust, 56 Python), plus 7 for the viewer and 22 for the repository scripts.**
+**226 tests (170 Rust, 56 Python), plus 7 for the viewer and 25 for the repository scripts.**
 
 > The Action **reports** by default. Set `fail-on: failures` to make it block: after the comment and
 > artifacts are posted, it fails the job when any scenario has failures **on the real plan**, or is
@@ -65,7 +64,7 @@ applied to a clone of the graph, re-solved, and reported as `Resolved`, `Still f
 ## Quickstart
 
 ```bash
-git clone https://github.com/veerarakesh56/helios && cd helios
+git clone https://github.com/<org>/helios && cd helios
 make demo
 ```
 
@@ -164,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # ... terraform init && terraform plan -out=tfplan && terraform show -json tfplan > plan.json
-      - uses: veerarakesh56/helios/action@<commit-sha>   # pin a full commit SHA
+      - uses: <org>/helios/action@<commit-sha>   # pin a full commit SHA
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           terraform-json: plan.json   # required: your plan, relative to the repository root
@@ -194,7 +193,7 @@ node for its Terraform attributes and the reason it failed.
 
 ## Tests
 
-**226 tests (plus 7 for the web viewer and 22 for the scripts in `scripts/`):**
+**226 tests (plus 7 for the web viewer and 25 for the scripts in `scripts/`):**
 
 | | |
 |---|---|
@@ -279,7 +278,7 @@ Python suite, the `scripts/` tests and the viewer's on every push.
 
 ## Related
 
-**[WARDEN](https://github.com/veerarakesh56/warden)** — the same principle applied to live incident
+**[WARDEN](https://github.com/<org>/warden)** — the same principle applied to live incident
 response: the model proposes, a deterministic verifier decides, nothing executes against
 infrastructure.
 

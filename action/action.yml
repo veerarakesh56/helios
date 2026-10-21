@@ -5,7 +5,7 @@ description: >
   advisory output only, verify a matching fix file if one is committed),
   upload the resulting `inspect` JSON artifacts, and post a single sticky PR
   comment summarising results.
-author: veerarakesh56
+author: The Helios Authors
 
 branding:
   icon: alert-triangle

@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # (text-to-append, delay-ms-after-frame). Use "" + delay for pure-pause frames.
 SCRIPT: list[tuple[str, int]] = [
-    ("$ git clone https://github.com/veerarakesh56/helios && cd helios\n", 600),
+    ("$ git clone https://github.com/<org>/helios && cd helios\n", 600),
     ("Cloning into 'helios'...\n", 400),
     ("$ make demo\n", 600),
     ("cargo build --bin helios\n", 400),
