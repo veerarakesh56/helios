@@ -16,8 +16,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`check_publishable.py`: only a globally routable IPv4 is a finding.** The hand-written list of
   non-public networks is replaced by `ipaddress`'s `is_global` (the IANA special-purpose
   registry). Every address that was not a finding still is not; shared (100.64.0.0/10),
-  benchmarking (198.18.0.0/15), reserved (240.0.0.0/4) and `0.0.0.0/8` addresses are no longer
-  reported, as none can be public. `scan()` is split into small functions (same output, pinned by
+  benchmarking (198.18.0.0/15), reserved (240.0.0.0/4), `0.0.0.0/8` and multicast (224.0.0.0/4)
+  addresses are no longer reported, as none can be a public host. `scan()` is split into small functions (same output, pinned by
   a new test).
 
 ### Changed

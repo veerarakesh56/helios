@@ -218,7 +218,8 @@ class CheckPublishable(unittest.TestCase):
 
     def test_only_a_globally_routable_ip_is_a_finding(self) -> None:
         # Special-purpose space (IANA registry, via ipaddress.is_global) is never a public address.
-        for fine in ("100.64.0.1", "198.18.0.1", "240.0.0.1", "0.1.2.3", "255.255.255.255"):
+        for fine in ("100.64.0.1", "198.18.0.1", "240.0.0.1", "0.1.2.3", "255.255.255.255",
+                     "239.255.255.250", "224.0.1.1"):  # multicast: a group, not a host
             self.assertEqual(self._scan("a.json", fine), [], fine)
         # Just outside the RFC 1918 / shared / link-local blocks: public, so a finding.
         for public in ("11.0.0.1", "172.32.0.1", "192.169.0.1", "100.128.0.1", "169.255.0.1"):

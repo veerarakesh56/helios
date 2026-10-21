@@ -105,12 +105,13 @@ def _is_public_ipv4(text: str) -> bool:
     """Only a globally routable address is a finding. `is_global` reads the IANA special-purpose
     registry the standard library ships: private (RFC 1918), loopback, unspecified, link-local and
     the RFC 5737 documentation ranges are not global, nor are shared (100.64.0.0/10), benchmarking
-    (198.18.0.0/15) and reserved (240.0.0.0/4) space - none of which can be a public address."""
+    (198.18.0.0/15) and reserved (240.0.0.0/4) space - none of which can be a public address.
+    Multicast (224.0.0.0/4) counts as global there, but it names a group, not a host: not a finding."""
     try:
         ip = ipaddress.IPv4Address(text)
     except ValueError:  # an octet > 255: a version string, not an address
         return False
-    return ip.is_global
+    return ip.is_global and not ip.is_multicast
 
 
 def _git_files() -> list[pathlib.Path]:
