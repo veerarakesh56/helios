@@ -1,6 +1,6 @@
 """Inference through the locally installed `claude` CLI in headless (`-p`) mode.
 
-For an owner with a Claude subscription (Max) and no API key. `ClaudeCliClient` duck-types the
+For a user with a Claude subscription (Max) and no API key. `ClaudeCliClient` duck-types the
 one method Helios uses, `client.messages.create(**kw)`, so `explain.py` and `fix_generator.py`
 do not know which provider they are talking to. Mirrors WARDEN's `ClaudeCliProvider`.
 

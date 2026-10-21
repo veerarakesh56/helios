@@ -1,4 +1,4 @@
-//! Second-review repros (`fixtures/edge-cases/`): each used to read as "resilient" or to abort.
+//! Review repros (`fixtures/edge-cases/`): each used to read as "resilient" or to abort.
 
 use std::collections::BTreeSet;
 

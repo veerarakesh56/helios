@@ -37,7 +37,7 @@ pub(crate) fn region_of_az(az: &str) -> String {
 
 /// Last-resort region, used only when NOTHING in the graph declares one.
 ///
-/// Until 2026-09-06 this was the region every resource without an explicit `region` attribute got,
+/// Before v0.1.3 this was the region every resource without an explicit `region` attribute got,
 /// which silently produced the wrong answer for any estate outside it: a eu-west-2 multi-AZ database
 /// survived a eu-west-2 outage and fell with a us-east-1 one. The region is now derived per resource
 /// (`helios_models::region_for`) with `infer_region` over the whole graph as the default.
@@ -1097,7 +1097,7 @@ mod encode_tests {
 
     #[test]
     fn a_non_default_region_estate_is_not_placed_in_us_east_1() {
-        // Until 2026-09-06 every resource without an explicit `region` attribute was placed in the
+        // Before v0.1.3 every resource without an explicit `region` attribute was placed in the
         // hard-coded us-east-1, so a eu-west-2 estate SURVIVED a eu-west-2 outage and FELL with a
         // us-east-1 one. Both directions are wrong answers, and nothing warned.
         //
